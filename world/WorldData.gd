@@ -13,6 +13,13 @@ const BIOME_FOREST := "forest"
 const BIOME_TUNDRA:= "tundra"
 const BIOME_TAIGA := "taiga"
 const BIOME_JUNGLE := "jungle"
+const BIOME_RIVER := "river"
+
+const RESOURCE_NONE := "none"
+const RESOURCE_IRON := "iron"
+const RESOURCE_COAL := "coal"
+const RESOURCE_GOLD := "gold"
+const RESOURCE_FISH := "fish"
 
 var width: int
 var height: int
@@ -28,14 +35,16 @@ func setup(new_width: int, new_height: int, new_seed: int):
 
 	for y in range(height):
 		var row := []
-
+#THE TILE DICTIONARY \/ \/ \/ \/ \/
 		for x in range(width):
 			row.append({
+				"fertility": -1.0,
 				"elevation": 0.0,
 				"temperature": 0.0,
 				"rainfall": 0.0,
 				"terrain": TERRAIN_WATER,
 				"biome": BIOME_OCEAN,
+				"resource": RESOURCE_NONE,
 				"is_land": false
 			})
 

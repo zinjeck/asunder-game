@@ -1,16 +1,16 @@
 extends Node2D
 
-const TILE_SIZE := 8
-
 enum ViewMode {
 	BIOME,
 	ELEVATION,
 	TEMPERATURE,
-	RAINFALL
+	RAINFALL,
+	FERTILITY,
+	RESOURCES
 }
 
 var view_mode: ViewMode = ViewMode.BIOME
-
+var settings := MapSettings.new()
 var world: WorldData
 var generator := WorldGenerator.new()
 
@@ -42,6 +42,16 @@ func _input(event):
 			view_mode = ViewMode.RAINFALL
 			print("View: Rainfall")
 			queue_redraw()
+			
+		elif event.keycode == KEY_5:
+			view_mode = ViewMode.RESOURCES
+			print("View: Resources")
+			queue_redraw()
+			
+		elif event.keycode == KEY_6:
+			view_mode = ViewMode.FERTILITY
+			print("View: Fertility")
+			queue_redraw()
 
 
 func _draw():
@@ -55,10 +65,10 @@ func _draw():
 
 			draw_rect(
 				Rect2(
-					x * TILE_SIZE,
-					y * TILE_SIZE,
-					TILE_SIZE,
-					TILE_SIZE
+					x * settings.tile_size,
+					y * settings.tile_size,
+					settings.tile_size,
+					settings.tile_size
 				),
 				color
 			)
@@ -78,8 +88,33 @@ func get_tile_color(tile: Dictionary) -> Color:
 		ViewMode.RAINFALL:
 			return get_rainfall_color(tile)
 
+		ViewMode.FERTILITY:
+			return get_fertility_overlay_color(tile)
+
+		ViewMode.RESOURCES:
+			return get_resource_overlay_color(tile)
+
 	return Color.MAGENTA
 
+func get_fertility_overlay_color(tile: Dictionary) -> Color:
+	var biome: String = tile["biome"]
+
+	if biome == WorldData.BIOME_OCEAN:
+		return get_biome_color(tile).darkened(0.65)
+
+	if biome == WorldData.BIOME_RIVER:
+		return Color(0.0, 0.85, 1.0)
+
+	var base_color := get_biome_color(tile).darkened(0.45)
+	var fertility: float = tile["fertility"]
+
+	var fertility_color := Color(
+		1.0 - fertility / 100.0,
+		fertility / 100.0,
+		0.08
+	)
+
+	return base_color.lerp(fertility_color, 0.75)
 
 func get_biome_color(tile: Dictionary) -> Color:
 	var biome: String = tile["biome"]
@@ -100,6 +135,9 @@ func get_biome_color(tile: Dictionary) -> Color:
 		WorldData.BIOME_PLAIN:
 			return Color(0.18, 0.62, 0.20)
 
+		WorldData.BIOME_RIVER:
+			return Color(0.0, 0.45, 0.95)
+	
 		WorldData.BIOME_FOREST:
 			return Color(0.03, 0.32, 0.08)
 
@@ -123,12 +161,63 @@ func get_elevation_color(tile: Dictionary) -> Color:
 
 
 func get_temperature_color(tile: Dictionary) -> Color:
+	var biome: String = tile["biome"]
+
+	if biome == WorldData.BIOME_OCEAN:
+		return get_biome_color(tile).darkened(0.45)
+
+	if biome == WorldData.BIOME_RIVER:
+		return get_biome_color(tile)
+
+	var base_color := get_biome_color(tile).darkened(0.45)
 	var temperature: float = tile["temperature"]
 
-	return Color(temperature, 0.1, 1.0 - temperature)
+	var temperature_color := Color(
+		temperature,
+		0.10,
+		1.0 - temperature
+	)
+
+	return base_color.lerp(temperature_color, 0.70)
 
 
 func get_rainfall_color(tile: Dictionary) -> Color:
+	var biome: String = tile["biome"]
+
+	if biome == WorldData.BIOME_OCEAN:
+		return get_biome_color(tile).darkened(0.45)
+
+	if biome == WorldData.BIOME_RIVER:
+		return get_biome_color(tile)
+
+	var base_color := get_biome_color(tile).darkened(0.45)
 	var rainfall: float = tile["rainfall"]
 
-	return Color(0.05, rainfall, 1.0 - rainfall)
+	var rainfall_color := Color(
+		0.08,
+		rainfall,
+		1.0 - rainfall
+	)
+
+	return base_color.lerp(rainfall_color, 0.70)
+	
+func get_resource_overlay_color(tile: Dictionary) -> Color:
+	var base_color := get_biome_color(tile)
+	var resource: String = tile["resource"]
+
+	if resource == WorldData.RESOURCE_NONE:
+		return base_color.darkened(0.55)
+
+	if resource == WorldData.RESOURCE_FISH:
+		return Color(0.82, 0.42, 0.95)
+
+	if resource == WorldData.RESOURCE_COAL:
+		return Color(0.02, 0.02, 0.02)
+
+	if resource == WorldData.RESOURCE_IRON:
+		return Color(0.73, 0.64, 0.48)
+
+	if resource == WorldData.RESOURCE_GOLD:
+		return Color(0.93, 0.74, 0.22)
+
+	return Color.MAGENTA
