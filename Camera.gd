@@ -1,4 +1,5 @@
 extends Camera2D
+class_name StrategyCamera2D
 
 @export var move_speed: float = 650.0
 @export var zoom_speed: float = 0.15
@@ -13,9 +14,26 @@ extends Camera2D
 
 var settings: MapSettings = MapSettings.new()
 
+var map_width_tiles: int = 0
+var map_height_tiles: int = 0
+var map_tile_size: int = 0
+
 
 func _ready() -> void:
-	position = get_map_center()
+	if map_width_tiles <= 0 or map_height_tiles <= 0 or map_tile_size <= 0:
+		configure_for_map(settings.width, settings.height, settings.tile_size, true)
+	else:
+		clamp_camera_to_map_bounds()
+
+
+func configure_for_map(width_tiles: int, height_tiles: int, tile_size: int, center_camera: bool = true) -> void:
+	map_width_tiles = width_tiles
+	map_height_tiles = height_tiles
+	map_tile_size = tile_size
+
+	if center_camera:
+		position = get_map_center()
+
 	clamp_camera_to_map_bounds()
 
 
@@ -42,7 +60,6 @@ func _input(event: InputEvent) -> void:
 func get_camera_movement_direction() -> Vector2:
 	var direction: Vector2 = Vector2.ZERO
 
-	# WASD and arrow-key movement.
 	if Input.is_key_pressed(KEY_D) or Input.is_action_pressed("ui_right"):
 		direction.x += 1.0
 
@@ -55,7 +72,6 @@ func get_camera_movement_direction() -> Vector2:
 	if Input.is_key_pressed(KEY_W) or Input.is_action_pressed("ui_up"):
 		direction.y -= 1.0
 
-	# Edge scrolling.
 	if edge_scroll_enabled:
 		var viewport_size: Vector2 = get_viewport_rect().size
 		var mouse_position: Vector2 = get_viewport().get_mouse_position()
@@ -126,8 +142,21 @@ func clamp_camera_to_map_bounds() -> void:
 
 
 func get_map_pixel_size() -> Vector2:
-	var pixel_width: float = float(settings.width * settings.tile_size)
-	var pixel_height: float = float(settings.height * settings.tile_size)
+	var width_tiles := map_width_tiles
+	var height_tiles := map_height_tiles
+	var tile_size := map_tile_size
+
+	if width_tiles <= 0:
+		width_tiles = settings.width
+
+	if height_tiles <= 0:
+		height_tiles = settings.height
+
+	if tile_size <= 0:
+		tile_size = settings.tile_size
+
+	var pixel_width: float = float(width_tiles * tile_size)
+	var pixel_height: float = float(height_tiles * tile_size)
 
 	return Vector2(pixel_width, pixel_height)
 

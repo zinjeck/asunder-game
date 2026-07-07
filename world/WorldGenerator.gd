@@ -11,9 +11,24 @@ var coastline_noise := FastNoiseLite.new()
 var island_noise := FastNoiseLite.new()
 var mountain_noise := FastNoiseLite.new()
 var open_ocean_cache := {}
+var open_ocean_lookup := {}
 var continent_centers: Array[Dictionary] = []
 var settings := MapSettings.new()
+const HILL_MOUNTAIN_SCORE: float = 0.62
+const PEAK_MOUNTAIN_SCORE: float = 0.76
+const PEAK_NEIGHBOR_RADIUS: int = 2
+const PEAK_REQUIRED_MOUNTAIN_NEIGHBORS: int = 12
+const BASE_IRON_SPAWN_CHANCE: float = 0.002
+const BASE_COAL_SPAWN_CHANCE: float = 0.004
 
+const MOUNTAIN_IRON_SPAWN_CHANCE: float = 0.003
+const MOUNTAIN_COAL_SPAWN_CHANCE: float = 0.005
+
+const HILLS_IRON_SPAWN_CHANCE: float = 0.005
+const HILLS_COAL_SPAWN_CHANCE: float = 0.007
+
+const MOUNTAIN_GOLD_SPAWN_CHANCE: float = 0.00045
+const HILLS_GOLD_SPAWN_CHANCE: float = 0.00060
 
 func generate_world(seed_override: int = 0) -> WorldData:
 	if seed_override == 0:
@@ -34,6 +49,7 @@ func generate_world(seed_override: int = 0) -> WorldData:
 	generate_precipitation(world)
 	assign_basic_terrain(world)
 	assign_biomes(world)
+	build_open_ocean_lookup(world)
 	generate_rivers(world)
 	assign_fertility(world)
 	assign_resources(world)
@@ -42,8 +58,10 @@ func generate_world(seed_override: int = 0) -> WorldData:
 
 func assign_biomes(world: WorldData):
 	for y in range(world.height):
+		var row: Array = world.tiles[y]
+
 		for x in range(world.width):
-			var tile := world.get_tile(x, y)
+			var tile: Dictionary = row[x]
 
 			var terrain: String = tile["terrain"]
 			var elevation: float = tile["elevation"]
@@ -54,36 +72,75 @@ func assign_biomes(world: WorldData):
 			if terrain == WorldData.TERRAIN_WATER:
 				tile["biome"] = WorldData.BIOME_OCEAN
 
-			elif mountain_score > 0.62:
-				tile["biome"] = WorldData.BIOME_MOUNTAIN
-
-			elif temperature >= 0.62:
-				if precipitation < 0.24:
-					tile["biome"] = WorldData.BIOME_DESERT
-				elif precipitation < 0.68:
-					tile["biome"] = WorldData.BIOME_PLAIN
-				else:
-					tile["biome"] = WorldData.BIOME_JUNGLE
-
-			elif temperature <= 0.34:
-				if precipitation < 0.45:
-					tile["biome"] = WorldData.BIOME_TUNDRA
-				else:
-					tile["biome"] = WorldData.BIOME_TAIGA
-
 			else:
-				if precipitation < 0.42:
-					tile["biome"] = WorldData.BIOME_PLAIN
-				else:
-					tile["biome"] = WorldData.BIOME_FOREST
+				tile["terrain"] = WorldData.TERRAIN_LAND
 
-			world.set_tile(x, y, tile)
+				if mountain_score > HILL_MOUNTAIN_SCORE:
+					if is_mountain_peak_center(world, x, y, mountain_score):
+						tile["biome"] = WorldData.BIOME_MOUNTAIN
+						tile["terrain"] = WorldData.TERRAIN_MOUNTAIN
+					else:
+						tile["biome"] = WorldData.BIOME_HILLS
+						tile["terrain"] = WorldData.TERRAIN_LAND
+
+				elif temperature >= 0.62:
+					if precipitation < 0.24:
+						tile["biome"] = WorldData.BIOME_DESERT
+					elif precipitation < 0.68:
+						tile["biome"] = WorldData.BIOME_PLAIN
+					else:
+						tile["biome"] = WorldData.BIOME_JUNGLE
+
+				elif temperature <= 0.34:
+					if precipitation < 0.45:
+						tile["biome"] = WorldData.BIOME_TUNDRA
+					else:
+						tile["biome"] = WorldData.BIOME_TAIGA
+
+				else:
+					if precipitation < 0.42:
+						tile["biome"] = WorldData.BIOME_PLAIN
+					else:
+						tile["biome"] = WorldData.BIOME_FOREST
 
 func get_mountain_score(x: int, y: int, elevation: float) -> float:
 	var ridge: float = absf(mountain_noise.get_noise_2d(x, y))
 	var elevation_bonus: float = clamp(elevation, 0.0, 1.0) * 0.55
 
 	return ridge + elevation_bonus
+
+func is_mountain_peak_center(world: WorldData, x: int, y: int, mountain_score: float) -> bool:
+	if mountain_score < PEAK_MOUNTAIN_SCORE:
+		return false
+
+	var old_mountain_neighbor_count := 0
+
+	for oy in range(-PEAK_NEIGHBOR_RADIUS, PEAK_NEIGHBOR_RADIUS + 1):
+		for ox in range(-PEAK_NEIGHBOR_RADIUS, PEAK_NEIGHBOR_RADIUS + 1):
+			if ox == 0 and oy == 0:
+				continue
+
+			var nx := x + ox
+			var ny := y + oy
+
+			if nx < 0 or ny < 0 or nx >= world.width or ny >= world.height:
+				continue
+
+			var neighbor := world.get_tile(nx, ny)
+
+			if neighbor["terrain"] == WorldData.TERRAIN_WATER:
+				continue
+
+			var neighbor_elevation: float = neighbor["elevation"]
+			var neighbor_score: float = get_mountain_score(nx, ny, neighbor_elevation)
+
+			if neighbor_score > HILL_MOUNTAIN_SCORE:
+				old_mountain_neighbor_count += 1
+
+	return old_mountain_neighbor_count >= PEAK_REQUIRED_MOUNTAIN_NEIGHBORS
+
+func is_mountain_or_hills_biome(biome: String) -> bool:
+	return biome == WorldData.BIOME_MOUNTAIN or biome == WorldData.BIOME_HILLS
 
 func setup_noise():
 	setup_continent_centers()
@@ -196,15 +253,25 @@ func create_small_continent(position: Vector2, rng: RandomNumberGenerator) -> Di
 	var lobe_count := rng.randi_range(4, 6)
 
 	for l in range(lobe_count):
+		var offset := Vector2(
+			rng.randf_range(-settings.width * 0.10, settings.width * 0.10),
+			rng.randf_range(-settings.height * 0.09, settings.height * 0.09)
+		)
+
+		var radius_x := rng.randf_range(settings.width * 0.050, settings.width * 0.115)
+		var radius_y := rng.randf_range(settings.height * 0.050, settings.height * 0.115)
+		var angle := rng.randf_range(0.0, TAU)
+
 		lobes.append({
-			"offset": Vector2(
-				rng.randf_range(-settings.width * 0.10, settings.width * 0.10),
-				rng.randf_range(-settings.height * 0.09, settings.height * 0.09)
-			),
-			"radius_x": rng.randf_range(settings.width * 0.050, settings.width * 0.115),
-			"radius_y": rng.randf_range(settings.height * 0.050, settings.height * 0.115),
+			"offset": offset,
+			"radius_x": radius_x,
+			"radius_y": radius_y,
+			"inv_radius_x": 1.0 / radius_x,
+			"inv_radius_y": 1.0 / radius_y,
 			"strength": rng.randf_range(0.46, 0.72),
-			"angle": rng.randf_range(0.0, TAU)
+			"angle": angle,
+			"cos_angle": cos(angle),
+			"sin_angle": sin(angle)
 		})
 
 	return {
@@ -214,6 +281,8 @@ func create_small_continent(position: Vector2, rng: RandomNumberGenerator) -> Di
 
 func generate_elevation(world: WorldData):
 	for y in range(world.height):
+		var row: Array = world.tiles[y]
+
 		for x in range(world.width):
 			var continent_core: float = get_continent_center_bias(x, y)
 			var large_shape: float = continent_noise.get_noise_2d(x, y) * 0.14 * continent_core
@@ -224,14 +293,14 @@ func generate_elevation(world: WorldData):
 
 			var elevation: float = continent_core + large_shape + regional_shape + coastline_breakup + island_value - edge_falloff - 0.14
 
-			var tile := world.get_tile(x, y)
+			var tile: Dictionary = row[x]
 			tile["elevation"] = elevation
 			tile["is_land"] = elevation > settings.sea_level
-			world.set_tile(x, y, tile)
 
 func get_continent_center_bias(x: int, y: int) -> float:
 	var strongest_bias := 0.0
-	var position := Vector2(x, y)
+	var px := float(x)
+	var py := float(y)
 
 	for continent in continent_centers:
 		var continent_position: Vector2 = continent["position"]
@@ -239,26 +308,26 @@ func get_continent_center_bias(x: int, y: int) -> float:
 		var continent_bias := 0.0
 
 		for lobe in lobes:
-			var lobe_center: Vector2 = continent_position + lobe["offset"]
-			var radius_x: float = lobe["radius_x"]
-			var radius_y: float = lobe["radius_y"]
-			var strength: float = lobe["strength"]
-			var angle: float = lobe["angle"]
+			var lobe_offset: Vector2 = lobe["offset"]
+			var lobe_center_x: float = continent_position.x + lobe_offset.x
+			var lobe_center_y: float = continent_position.y + lobe_offset.y
 
-			var offset := position - lobe_center
-			var cos_a := cos(angle)
-			var sin_a := sin(angle)
+			var offset_x := px - lobe_center_x
+			var offset_y := py - lobe_center_y
 
-			var rotated_x := offset.x * cos_a - offset.y * sin_a
-			var rotated_y := offset.x * sin_a + offset.y * cos_a
+			var cos_a: float = lobe["cos_angle"]
+			var sin_a: float = lobe["sin_angle"]
 
-			var dx: float = absf(rotated_x) / radius_x
-			var dy: float = absf(rotated_y) / radius_y
+			var rotated_x := offset_x * cos_a - offset_y * sin_a
+			var rotated_y := offset_x * sin_a + offset_y * cos_a
+
+			var dx: float = absf(rotated_x) * float(lobe["inv_radius_x"])
+			var dy: float = absf(rotated_y) * float(lobe["inv_radius_y"])
 
 			var distance: float = pow(pow(dx, 1.35) + pow(dy, 1.35), 1.0 / 1.35)
 
 			var bias: float = clamp(1.0 - distance, 0.0, 1.0)
-			bias = pow(bias, 1.18) * strength
+			bias = pow(bias, 1.18) * float(lobe["strength"])
 
 			continent_bias += bias
 
@@ -298,45 +367,44 @@ func get_edge_falloff(x: int, y: int, width: int, height: int) -> float:
 
 func generate_temperature(world: WorldData):
 	for y in range(world.height):
+		var row: Array = world.tiles[y]
 		var latitude: float = float(y) / float(world.height - 1)
+		var base_temperature: float = get_temperature_from_latitude(latitude)
 
 		for x in range(world.width):
-			var elevation: float = world.get_tile(x, y)["elevation"]
-			var base_temperature: float = get_temperature_from_latitude(latitude)
+			var tile: Dictionary = row[x]
+			var elevation: float = tile["elevation"]
 
 			var elevation_cooling: float = max(elevation, 0.0) * 0.35
 			var temperature: float = clamp(base_temperature - elevation_cooling, 0.0, 1.0)
 
-			var tile := world.get_tile(x, y)
 			tile["temperature"] = temperature
-			world.set_tile(x, y, tile)
 
 
 func generate_precipitation(world: WorldData):
 	for y in range(world.height):
+		var row: Array = world.tiles[y]
+
 		for x in range(world.width):
 			var noise_value: float = precipitation_noise.get_noise_2d(x, y)
 			var precipitation: float = (noise_value + 1.0) / 2.0
 
-			var tile := world.get_tile(x, y)
+			var tile: Dictionary = row[x]
 			tile["precipitation"] = precipitation
-			world.set_tile(x, y, tile)
 
 
 func assign_basic_terrain(world: WorldData):
 	for y in range(world.height):
+		var row: Array = world.tiles[y]
+
 		for x in range(world.width):
-			var tile := world.get_tile(x, y)
+			var tile: Dictionary = row[x]
 			var elevation: float = tile["elevation"]
 
 			if elevation <= settings.sea_level:
 				tile["terrain"] = WorldData.TERRAIN_WATER
-			elif elevation >= settings.mountain_level:
-				tile["terrain"] = WorldData.TERRAIN_MOUNTAIN
 			else:
 				tile["terrain"] = WorldData.TERRAIN_LAND
-
-			world.set_tile(x, y, tile)
 
 
 func get_temperature_from_latitude(latitude: float) -> float:
@@ -345,35 +413,64 @@ func get_temperature_from_latitude(latitude: float) -> float:
 
 func assign_resources(world: WorldData):
 	for y in range(world.height):
+		var row: Array = world.tiles[y]
+
 		for x in range(world.width):
-			var tile := world.get_tile(x, y)
+			var tile: Dictionary = row[x]
 
 			tile["resource"] = WorldData.RESOURCE_NONE
 
 			if is_coastal_water(world, x, y):
 				if rng.randf() < 0.28:
 					tile["resource"] = WorldData.RESOURCE_FISH
+				continue
 
-			elif is_mountain_or_near_mountain(world, x, y):
-				var roll := rng.randf()
+			if tile["terrain"] == WorldData.TERRAIN_WATER:
+				continue
 
-				if roll < 0.001:
-					tile["resource"] = WorldData.RESOURCE_GOLD
-				elif roll < 0.020:
-					tile["resource"] = WorldData.RESOURCE_IRON
-				elif roll < 0.052:
-					tile["resource"] = WorldData.RESOURCE_COAL
+			var biome: String = tile["biome"]
 
-			elif tile["terrain"] != WorldData.TERRAIN_WATER:
-				var scattered_roll := rng.randf()
+			var gold_chance: float = get_gold_spawn_chance(biome)
+			var iron_chance: float = get_iron_spawn_chance(biome)
+			var coal_chance: float = get_coal_spawn_chance(biome)
 
-				if scattered_roll < 0.003:
-					tile["resource"] = WorldData.RESOURCE_IRON
-				elif scattered_roll < 0.008:
-					tile["resource"] = WorldData.RESOURCE_COAL
+			var roll := rng.randf()
 
-			world.set_tile(x, y, tile)
+			if gold_chance > 0.0 and roll < gold_chance:
+				tile["resource"] = WorldData.RESOURCE_GOLD
+			elif roll < gold_chance + iron_chance:
+				tile["resource"] = WorldData.RESOURCE_IRON
+			elif roll < gold_chance + iron_chance + coal_chance:
+				tile["resource"] = WorldData.RESOURCE_COAL
 
+func get_iron_spawn_chance(biome: String) -> float:
+	if biome == WorldData.BIOME_HILLS:
+		return HILLS_IRON_SPAWN_CHANCE
+
+	if biome == WorldData.BIOME_MOUNTAIN:
+		return MOUNTAIN_IRON_SPAWN_CHANCE
+
+	return BASE_IRON_SPAWN_CHANCE
+
+
+func get_coal_spawn_chance(biome: String) -> float:
+	if biome == WorldData.BIOME_HILLS:
+		return HILLS_COAL_SPAWN_CHANCE
+
+	if biome == WorldData.BIOME_MOUNTAIN:
+		return MOUNTAIN_COAL_SPAWN_CHANCE
+
+	return BASE_COAL_SPAWN_CHANCE
+
+
+func get_gold_spawn_chance(biome: String) -> float:
+	if biome == WorldData.BIOME_HILLS:
+		return HILLS_GOLD_SPAWN_CHANCE
+
+	if biome == WorldData.BIOME_MOUNTAIN:
+		return MOUNTAIN_GOLD_SPAWN_CHANCE
+
+	return 0.0
 
 func is_coastal_water(world: WorldData, x: int, y: int) -> bool:
 	var tile := world.get_tile(x, y)
@@ -400,6 +497,7 @@ func is_coastal_water(world: WorldData, x: int, y: int) -> bool:
 	return false
 
 
+
 func is_mountain_or_near_mountain(world: WorldData, x: int, y: int) -> bool:
 	var tile := world.get_tile(x, y)
 
@@ -416,7 +514,7 @@ func is_mountain_or_near_mountain(world: WorldData, x: int, y: int) -> bool:
 
 			var neighbor := world.get_tile(nx, ny)
 
-			if neighbor["biome"] == WorldData.BIOME_MOUNTAIN:
+			if is_mountain_or_hills_biome(neighbor["biome"]):
 				return true
 
 	return false
@@ -433,7 +531,7 @@ func generate_rivers(world: WorldData):
 
 		var x := rng.randi_range(0, world.width - 1)
 		var y := rng.randi_range(0, world.height - 1)
-		var tile := world.get_tile(x, y)
+		var tile: Dictionary = world.tiles[y][x]
 
 		if tile["terrain"] == WorldData.TERRAIN_WATER:
 			continue
@@ -489,79 +587,100 @@ func is_mountain_valley_source(world: WorldData, x: int, y: int) -> bool:
 
 			var neighbor := world.get_tile(nx, ny)
 
-			if neighbor["biome"] == WorldData.BIOME_MOUNTAIN:
+			if is_mountain_or_hills_biome(neighbor["biome"]):
 				mountain_count += 1
 			elif neighbor["terrain"] != WorldData.TERRAIN_WATER:
 				land_passage_count += 1
 
 	return mountain_count >= 3 and land_passage_count >= 5
 
-func is_valid_river_mouth(world: WorldData, x: int, y: int) -> bool:
-	var start := Vector2i(x, y)
+func build_open_ocean_lookup(world: WorldData) -> void:
+	open_ocean_lookup.clear()
 
-	if open_ocean_cache.has(start):
-		return open_ocean_cache[start]
-
-	var result := ocean_body_reaches_map_edge(world, start)
-	open_ocean_cache[start] = result
-
-	return result
-
-func ocean_body_reaches_map_edge(world: WorldData, start: Vector2i) -> bool:
-	var queue: Array[Vector2i] = [start]
+	var queue: Array[Vector2i] = []
 	var visited := {}
 
-	while queue.size() > 0:
-		var current: Vector2i = queue.pop_front()
+	for x in range(world.width):
+		add_open_ocean_seed(world, x, 0, queue, visited)
+		add_open_ocean_seed(world, x, world.height - 1, queue, visited)
 
-		if visited.has(current):
-			continue
+	for y in range(world.height):
+		add_open_ocean_seed(world, 0, y, queue, visited)
+		add_open_ocean_seed(world, world.width - 1, y, queue, visited)
 
-		visited[current] = true
+	var queue_index := 0
 
-		if current.x <= 0 or current.y <= 0 or current.x >= world.width - 1 or current.y >= world.height - 1:
-			return true
+	while queue_index < queue.size():
+		var current: Vector2i = queue[queue_index]
+		queue_index += 1
 
-		var tile := world.get_tile(current.x, current.y)
+		open_ocean_lookup[current] = true
 
-		if tile["biome"] != WorldData.BIOME_OCEAN:
-			continue
+		var nx := current.x + 1
+		var ny := current.y
 
-		var neighbors := [
-			Vector2i(current.x + 1, current.y),
-			Vector2i(current.x - 1, current.y),
-			Vector2i(current.x, current.y + 1),
-			Vector2i(current.x, current.y - 1)
-		]
+		if nx >= 0 and ny >= 0 and nx < world.width and ny < world.height:
+			add_open_ocean_seed(world, nx, ny, queue, visited)
 
-		for neighbor in neighbors:
-			if neighbor.x < 0 or neighbor.y < 0 or neighbor.x >= world.width or neighbor.y >= world.height:
-				continue
+		nx = current.x - 1
+		ny = current.y
 
-			if visited.has(neighbor):
-				continue
+		if nx >= 0 and ny >= 0 and nx < world.width and ny < world.height:
+			add_open_ocean_seed(world, nx, ny, queue, visited)
 
-			var neighbor_tile := world.get_tile(neighbor.x, neighbor.y)
+		nx = current.x
+		ny = current.y + 1
 
-			if neighbor_tile["biome"] == WorldData.BIOME_OCEAN:
-				queue.append(neighbor)
+		if nx >= 0 and ny >= 0 and nx < world.width and ny < world.height:
+			add_open_ocean_seed(world, nx, ny, queue, visited)
 
-	return false
+		nx = current.x
+		ny = current.y - 1
+
+		if nx >= 0 and ny >= 0 and nx < world.width and ny < world.height:
+			add_open_ocean_seed(world, nx, ny, queue, visited)
+
+func add_open_ocean_seed(world: WorldData, x: int, y: int, queue: Array[Vector2i], visited: Dictionary) -> void:
+	var position := Vector2i(x, y)
+
+	if visited.has(position):
+		return
+
+	var tile: Dictionary = world.tiles[y][x]
+
+	if tile["biome"] != WorldData.BIOME_OCEAN:
+		return
+
+	visited[position] = true
+	queue.append(position)
+
+func is_valid_river_mouth(world: WorldData, x: int, y: int) -> bool:
+	return open_ocean_lookup.has(Vector2i(x, y))
 
 func create_continent(position: Vector2, rng: RandomNumberGenerator) -> Dictionary:
 	var lobes := []
 	var lobe_count := rng.randi_range(6, 9)
 
 	for l in range(lobe_count):
+		var offset := Vector2(
+			rng.randf_range(-settings.width * 0.17, settings.width * 0.17),
+			rng.randf_range(-settings.height * 0.15, settings.height * 0.15)
+		)
+
+		var radius_x := rng.randf_range(settings.width * 0.075, settings.width * 0.18)
+		var radius_y := rng.randf_range(settings.height * 0.075, settings.height * 0.19)
+		var angle := rng.randf_range(0.0, TAU)
+
 		lobes.append({
-			"offset": Vector2(
-				rng.randf_range(-settings.width * 0.17, settings.width * 0.17),
-				rng.randf_range(-settings.height * 0.15, settings.height * 0.15)
-			),
-			"radius_x": rng.randf_range(settings.width * 0.075, settings.width * 0.18),
-			"radius_y": rng.randf_range(settings.height * 0.075, settings.height * 0.19),
+			"offset": offset,
+			"radius_x": radius_x,
+			"radius_y": radius_y,
+			"inv_radius_x": 1.0 / radius_x,
+			"inv_radius_y": 1.0 / radius_y,
 			"strength": rng.randf_range(0.50, 0.86),
-			"angle": rng.randf_range(0.0, TAU)
+			"angle": angle,
+			"cos_angle": cos(angle),
+			"sin_angle": sin(angle)
 		})
 
 	return {
@@ -573,6 +692,7 @@ func carve_river(world: WorldData, start_x: int, start_y: int) -> bool:
 	var x := start_x
 	var y := start_y
 	var path: Array[Vector2i] = []
+	var path_lookup := {}
 	var max_length := 500
 	var ocean_direction := get_nearest_map_edge_direction(world, x, y)
 	var reached_valid_water := false
@@ -583,10 +703,10 @@ func carve_river(world: WorldData, start_x: int, start_y: int) -> bool:
 
 		var current_position := Vector2i(x, y)
 
-		if current_position in path:
+		if path_lookup.has(current_position):
 			return false
 
-		var tile := world.get_tile(x, y)
+		var tile: Dictionary = world.tiles[y][x]
 
 		if tile["biome"] == WorldData.BIOME_OCEAN:
 			if is_valid_river_mouth(world, x, y):
@@ -600,6 +720,7 @@ func carve_river(world: WorldData, start_x: int, start_y: int) -> bool:
 			break
 
 		path.append(current_position)
+		path_lookup[current_position] = true
 
 		var next: Vector2i = get_river_neighbor(world, x, y, ocean_direction)
 
@@ -616,7 +737,7 @@ func carve_river(world: WorldData, start_x: int, start_y: int) -> bool:
 		return false
 
 	for point in path:
-		var river_tile := world.get_tile(point.x, point.y)
+		var river_tile: Dictionary = world.tiles[point.y][point.x]
 
 		if river_tile["biome"] == WorldData.BIOME_OCEAN:
 			continue
@@ -624,8 +745,6 @@ func carve_river(world: WorldData, start_x: int, start_y: int) -> bool:
 		river_tile["terrain"] = WorldData.TERRAIN_WATER
 		river_tile["biome"] = WorldData.BIOME_RIVER
 		river_tile["fertility"] = -1.0
-
-		world.set_tile(point.x, point.y, river_tile)
 
 	return true
 
@@ -666,7 +785,7 @@ func get_river_neighbor(world: WorldData, x: int, y: int, ocean_direction: Vecto
 			if nx < 0 or ny < 0 or nx >= world.width or ny >= world.height:
 				continue
 
-			var neighbor := world.get_tile(nx, ny)
+			var neighbor: Dictionary = world.tiles[ny][nx]
 
 			if neighbor["biome"] == WorldData.BIOME_OCEAN:
 				if is_valid_river_mouth(world, nx, ny):
@@ -681,7 +800,8 @@ func get_river_neighbor(world: WorldData, x: int, y: int, ocean_direction: Vecto
 
 			if neighbor["biome"] == WorldData.BIOME_MOUNTAIN:
 				mountain_penalty = 45.0
-
+			elif neighbor["biome"] == WorldData.BIOME_HILLS:
+				mountain_penalty = 10.0
 			if ox == ocean_direction.x and oy == ocean_direction.y:
 				direction_bonus = -6.0
 
@@ -730,6 +850,9 @@ func assign_fertility(world: WorldData):
 				WorldData.BIOME_DESERT:
 					fertility = precipitation * 28.0
 
+				WorldData.BIOME_HILLS:
+					fertility = 22.0 + precipitation * 24.0
+
 				WorldData.BIOME_MOUNTAIN:
 					fertility = precipitation * 22.0
 
@@ -777,7 +900,7 @@ func is_near_mountain_biome(world: WorldData, x: int, y: int) -> bool:
 			if nx < 0 or ny < 0 or nx >= world.width or ny >= world.height:
 				continue
 
-			if world.get_tile(nx, ny)["biome"] == WorldData.BIOME_MOUNTAIN:
+			if is_mountain_or_hills_biome(world.get_tile(nx, ny)["biome"]):
 				return true
 
 	return false

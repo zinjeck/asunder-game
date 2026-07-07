@@ -20,6 +20,7 @@ var settings := MapSettings.new()
 var world: WorldData
 var generator := WorldGenerator.new()
 @export_file("*.tscn") var main_menu_scene_path: String = "res://scenes/MainMenu.tscn"
+@export_file("*.tscn") var city_scene_path: String = "res://scenes/CityScreen.tscn"
 
 var world_start_layer: CanvasLayer
 var world_start_background: ColorRect
@@ -86,8 +87,41 @@ func _ready():
 	create_world_bottom_buttons()
 	create_select_region_button()
 
-	world = null
-	print("World screen loaded. Press Generate World.")
+	if WorldData.has_active_world_save():
+		load_locked_world_save()
+	else:
+		world = null
+		print("World screen loaded. Press Generate World.")
+		queue_redraw()
+
+func load_locked_world_save() -> void:
+	world = WorldData.official_world
+
+	selected_region_center = WorldData.official_selected_region_center
+	selected_region_top_left = WorldData.official_selected_region_top_left
+
+	if WorldData.official_region_size > 0:
+		region_size_tiles = WorldData.official_region_size
+		region_half_size = int(region_size_tiles / 2)
+
+	region_cursor_state = RegionCursorState.REGION_SELECTED
+
+	if world_start_background != null:
+		world_start_background.visible = false
+
+	if select_region_button != null:
+		select_region_button.visible = true
+
+	update_selected_region_line()
+	update_cursor_visuals()
+	set_world_locked_ui()
+
+	if has_method("update_debug_panel_text"):
+		call("update_debug_panel_text")
+
+	print("Loaded locked official world seed: ", world.seed)
+
+	configure_world_camera()
 	queue_redraw()
 
 func create_hover_border_line():
@@ -653,7 +687,10 @@ func get_biome_color(tile: Dictionary) -> Color:
 
 		WorldData.BIOME_MOUNTAIN:
 			return Color(0.45, 0.42, 0.38)
-
+			
+		WorldData.BIOME_HILLS:
+			return Color(0.46, 0.31, 0.24)
+			
 		WorldData.BIOME_DESERT:
 			return Color(0.86, 0.72, 0.36)
 
@@ -927,6 +964,10 @@ func create_select_region_button() -> void:
 
 
 func on_select_region_button_pressed() -> void:
+	if WorldData.has_active_world_save():
+		print("Selection blocked: this save already has an official starting region.")
+		return
+	
 	if world == null:
 		return
 
@@ -936,6 +977,10 @@ func on_select_region_button_pressed() -> void:
 	print("Region selection mode enabled.")
 
 func on_generate_world_button_pressed() -> void:
+	if WorldData.has_active_world_save():
+		print("Generate blocked: this save already has an official world.")
+		return
+	
 	hovered_tile = Vector2i(-1, -1)
 	region_cursor_state = RegionCursorState.SINGLE_TILE
 	clear_selected_region()
@@ -960,16 +1005,94 @@ func on_generate_world_button_pressed() -> void:
 	if has_method("update_debug_panel_text"):
 		call("update_debug_panel_text")
 
+	configure_world_camera()
 	queue_redraw()
 
-
 func on_play_button_pressed() -> void:
+	if WorldData.has_active_world_save():
+		change_to_city_screen()
+		return
+
+	if world == null:
+		print("Play blocked: no world generated.")
+		return
+
 	if not has_selected_region():
 		print("Play blocked: select a starting region first.")
 		return
 
-	print("Play button pressed with selected region centered at: ", selected_region_center)
-	print("No gameplay action assigned yet.")
+	if city_scene_path.is_empty():
+		push_error("City scene path is empty.")
+		return
+
+	var current_world_scene_path := ""
+
+	if get_tree().current_scene != null:
+		current_world_scene_path = get_tree().current_scene.scene_file_path
+
+	WorldData.lock_world_save(
+		world,
+		selected_region_top_left,
+		selected_region_center,
+		region_size_tiles,
+		current_world_scene_path,
+		city_scene_path
+	)
+
+	set_world_locked_ui()
+
+	print("Official world locked.")
+	print("World seed: ", world.seed)
+	print("Starting region center: ", selected_region_center)
+	print("Starting region top-left: ", selected_region_top_left)
+
+	change_to_city_screen()
+
+func change_to_city_screen() -> void:
+	store_current_world_camera_state()
+	
+	var target_city_scene_path := WorldData.official_city_scene_path
+
+	if target_city_scene_path.is_empty():
+		target_city_scene_path = city_scene_path
+
+	if target_city_scene_path.is_empty():
+		push_error("City scene path is empty.")
+		return
+
+	var error: Error = get_tree().change_scene_to_file(target_city_scene_path)
+
+	if error != OK:
+		push_error("Could not load city scene: " + target_city_scene_path)
+
+func set_world_locked_ui() -> void:
+	set_button_locked_disabled(generate_world_button)
+	set_button_locked_disabled(select_region_button)
+
+	set_play_button_region_ready(true)
+
+	if play_button != null:
+		play_button.text = "City"
+
+
+func set_button_locked_disabled(button: Button) -> void:
+	if button == null:
+		return
+
+	button.disabled = true
+
+	var grey_style: StyleBoxFlat = create_world_button_style(Color(0.35, 0.35, 0.35, 0.30))
+
+	button.add_theme_stylebox_override("normal", grey_style)
+	button.add_theme_stylebox_override("hover", grey_style)
+	button.add_theme_stylebox_override("pressed", grey_style)
+	button.add_theme_stylebox_override("disabled", grey_style)
+	button.add_theme_stylebox_override("focus", grey_style)
+
+	button.add_theme_color_override("font_color", Color(0.75, 0.75, 0.75, 1.0))
+	button.add_theme_color_override("font_hover_color", Color(0.75, 0.75, 0.75, 1.0))
+	button.add_theme_color_override("font_pressed_color", Color(0.75, 0.75, 0.75, 1.0))
+	button.add_theme_color_override("font_disabled_color", Color(0.75, 0.75, 0.75, 1.0))
 
 func create_world_start_background() -> void:
 	world_start_layer = CanvasLayer.new()
@@ -1006,6 +1129,8 @@ func _unhandled_input(event: InputEvent) -> void:
 			handle_right_mouse_click()
 
 func handle_left_mouse_click() -> void:
+	if WorldData.has_active_world_save():
+		return
 	if region_cursor_state != RegionCursorState.REGION_PLACE:
 		return
 
@@ -1034,6 +1159,9 @@ func handle_left_mouse_click() -> void:
 
 
 func handle_right_mouse_click() -> void:
+	if WorldData.has_active_world_save():
+		return
+	
 	if has_selected_region():
 		clear_selected_region()
 
@@ -1061,3 +1189,30 @@ func clear_selected_region() -> void:
 
 	if selected_region_line != null:
 		selected_region_line.visible = false
+
+func configure_world_camera() -> void:
+	var current_camera: Camera2D = get_viewport().get_camera_2d()
+
+	if current_camera == null:
+		return
+
+	if current_camera.has_method("configure_for_map"):
+		current_camera.call("configure_for_map", world.width, world.height, settings.tile_size, false)
+
+	if WorldData.has_world_camera_state:
+		current_camera.position = WorldData.world_camera_position
+		current_camera.zoom = WorldData.world_camera_zoom
+
+	if current_camera.has_method("clamp_camera_to_map_bounds"):
+		current_camera.call("clamp_camera_to_map_bounds")
+
+
+func store_current_world_camera_state() -> void:
+	var current_camera: Camera2D = get_viewport().get_camera_2d()
+
+	if current_camera == null:
+		return
+
+	WorldData.world_camera_position = current_camera.position
+	WorldData.world_camera_zoom = current_camera.zoom
+	WorldData.has_world_camera_state = true
