@@ -225,7 +225,7 @@ func get_hovered_tile_debug_text() -> String:
 		fertility_text = "%.1f" % fertility
 
 	return (
-		"DEBUG TILE INSPECTOR\n"
+		"DEBUG INFO\n"
 		+ "View: " + get_view_mode_name() + "\n"
 		+ "Seed: " + str(world.seed) + "\n"
 		+ "\n"
