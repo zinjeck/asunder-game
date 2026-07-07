@@ -41,7 +41,7 @@ func setup(new_width: int, new_height: int, new_seed: int):
 				"fertility": -1.0,
 				"elevation": 0.0,
 				"temperature": 0.0,
-				"rainfall": 0.0,
+				"precipitation": 0.0,
 				"terrain": TERRAIN_WATER,
 				"biome": BIOME_OCEAN,
 				"resource": RESOURCE_NONE,

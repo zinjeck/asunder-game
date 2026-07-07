@@ -2,10 +2,11 @@ extends RefCounted
 class_name WorldGenerator
 
 var world_seed: int = 0
+var rng := RandomNumberGenerator.new()
 
 var continent_noise := FastNoiseLite.new()
 var detail_noise := FastNoiseLite.new()
-var rainfall_noise := FastNoiseLite.new()
+var precipitation_noise := FastNoiseLite.new()
 var coastline_noise := FastNoiseLite.new()
 var island_noise := FastNoiseLite.new()
 var mountain_noise := FastNoiseLite.new()
@@ -21,6 +22,8 @@ func generate_world(seed_override: int = 0) -> WorldData:
 	else:
 		world_seed = seed_override
 
+	rng.seed = world_seed
+
 	var world := WorldData.new()
 	world.setup(settings.width, settings.height, world_seed)
 
@@ -28,7 +31,7 @@ func generate_world(seed_override: int = 0) -> WorldData:
 
 	generate_elevation(world)
 	generate_temperature(world)
-	generate_rainfall(world)
+	generate_precipitation(world)
 	assign_basic_terrain(world)
 	assign_biomes(world)
 	generate_rivers(world)
@@ -45,7 +48,7 @@ func assign_biomes(world: WorldData):
 			var terrain: String = tile["terrain"]
 			var elevation: float = tile["elevation"]
 			var temperature: float = tile["temperature"]
-			var rainfall: float = tile["rainfall"]
+			var precipitation: float = tile["precipitation"]
 			var mountain_score: float = get_mountain_score(x, y, elevation)
 
 			if terrain == WorldData.TERRAIN_WATER:
@@ -55,21 +58,21 @@ func assign_biomes(world: WorldData):
 				tile["biome"] = WorldData.BIOME_MOUNTAIN
 
 			elif temperature >= 0.62:
-				if rainfall < 0.24:
+				if precipitation < 0.24:
 					tile["biome"] = WorldData.BIOME_DESERT
-				elif rainfall < 0.68:
+				elif precipitation < 0.68:
 					tile["biome"] = WorldData.BIOME_PLAIN
 				else:
 					tile["biome"] = WorldData.BIOME_JUNGLE
 
 			elif temperature <= 0.34:
-				if rainfall < 0.45:
+				if precipitation < 0.45:
 					tile["biome"] = WorldData.BIOME_TUNDRA
 				else:
 					tile["biome"] = WorldData.BIOME_TAIGA
 
 			else:
-				if rainfall < 0.42:
+				if precipitation < 0.42:
 					tile["biome"] = WorldData.BIOME_PLAIN
 				else:
 					tile["biome"] = WorldData.BIOME_FOREST
@@ -120,12 +123,12 @@ func setup_noise():
 	mountain_noise.fractal_gain = 0.58
 	mountain_noise.fractal_lacunarity = 2.25
 
-	rainfall_noise.seed = world_seed + 42113
-	rainfall_noise.noise_type = FastNoiseLite.TYPE_SIMPLEX
-	rainfall_noise.frequency = 0.025
-	rainfall_noise.fractal_octaves = 4
-	rainfall_noise.fractal_gain = 0.5
-	rainfall_noise.fractal_lacunarity = 2.0
+	precipitation_noise.seed = world_seed + 42113
+	precipitation_noise.noise_type = FastNoiseLite.TYPE_SIMPLEX
+	precipitation_noise.frequency = 0.025
+	precipitation_noise.fractal_octaves = 4
+	precipitation_noise.fractal_gain = 0.5
+	precipitation_noise.fractal_lacunarity = 2.0
 
 func setup_continent_centers():
 	continent_centers.clear()
@@ -144,7 +147,11 @@ func setup_continent_centers():
 		Vector2(0.82, 0.70)
 	]
 
-	slots.shuffle()
+	for i in range(slots.size() - 1, 0, -1):
+		var swap_index := rng.randi_range(0, i)
+		var temp: Vector2 = slots[i]
+		slots[i] = slots[swap_index]
+		slots[swap_index] = temp
 
 	for i in range(continent_count):
 		var slot: Vector2 = slots[i]
@@ -305,14 +312,14 @@ func generate_temperature(world: WorldData):
 			world.set_tile(x, y, tile)
 
 
-func generate_rainfall(world: WorldData):
+func generate_precipitation(world: WorldData):
 	for y in range(world.height):
 		for x in range(world.width):
-			var noise_value: float = rainfall_noise.get_noise_2d(x, y)
-			var rainfall: float = (noise_value + 1.0) / 2.0
+			var noise_value: float = precipitation_noise.get_noise_2d(x, y)
+			var precipitation: float = (noise_value + 1.0) / 2.0
 
 			var tile := world.get_tile(x, y)
-			tile["rainfall"] = rainfall
+			tile["precipitation"] = precipitation
 			world.set_tile(x, y, tile)
 
 
@@ -344,13 +351,13 @@ func assign_resources(world: WorldData):
 			tile["resource"] = WorldData.RESOURCE_NONE
 
 			if is_coastal_water(world, x, y):
-				if randf() < 0.28:
+				if rng.randf() < 0.28:
 					tile["resource"] = WorldData.RESOURCE_FISH
 
 			elif is_mountain_or_near_mountain(world, x, y):
-				var roll := randf()
+				var roll := rng.randf()
 
-				if roll < 0.003:
+				if roll < 0.001:
 					tile["resource"] = WorldData.RESOURCE_GOLD
 				elif roll < 0.020:
 					tile["resource"] = WorldData.RESOURCE_IRON
@@ -358,7 +365,7 @@ func assign_resources(world: WorldData):
 					tile["resource"] = WorldData.RESOURCE_COAL
 
 			elif tile["terrain"] != WorldData.TERRAIN_WATER:
-				var scattered_roll := randf()
+				var scattered_roll := rng.randf()
 
 				if scattered_roll < 0.003:
 					tile["resource"] = WorldData.RESOURCE_IRON
@@ -417,15 +424,15 @@ func is_mountain_or_near_mountain(world: WorldData, x: int, y: int) -> bool:
 func generate_rivers(world: WorldData):
 	open_ocean_cache.clear()
 
-	var max_rivers := randi_range(10, 16)
+	var max_rivers := rng.randi_range(10, 16)
 	var attempts := 0
 	var created := 0
 
 	while created < max_rivers and attempts < 50000:
 		attempts += 1
 
-		var x := randi_range(0, world.width - 1)
-		var y := randi_range(0, world.height - 1)
+		var x := rng.randi_range(0, world.width - 1)
+		var y := rng.randi_range(0, world.height - 1)
 		var tile := world.get_tile(x, y)
 
 		if tile["terrain"] == WorldData.TERRAIN_WATER:
@@ -443,13 +450,13 @@ func generate_rivers(world: WorldData):
 			if tile["elevation"] < 0.12:
 				continue
 
-			if randf() > 0.90:
+			if rng.randf() > 0.90:
 				continue
 		else:
 			if tile["elevation"] < 0.28:
 				continue
 
-			if randf() > 0.18:
+			if rng.randf() > 0.18:
 				continue
 
 		if carve_river(world, x, y):
@@ -670,7 +677,7 @@ func get_river_neighbor(world: WorldData, x: int, y: int, ocean_direction: Vecto
 			var elevation_score: float = neighbor["elevation"] * 10.0
 			var mountain_penalty := 0.0
 			var direction_bonus := 0.0
-			var meander_noise := randf_range(-5.0, 5.0)
+			var meander_noise := rng.randf_range(-5.0, 5.0)
 
 			if neighbor["biome"] == WorldData.BIOME_MOUNTAIN:
 				mountain_penalty = 45.0
@@ -699,32 +706,32 @@ func assign_fertility(world: WorldData):
 				world.set_tile(x, y, tile)
 				continue
 
-			var rainfall: float = tile["rainfall"]
+			var precipitation: float = tile["precipitation"]
 			var biome: String = tile["biome"]
 
 			var fertility := 0.0
 
 			match biome:
 				WorldData.BIOME_JUNGLE:
-					fertility = 60.0 + rainfall * 30.0
+					fertility = 60.0 + precipitation * 30.0
 
 				WorldData.BIOME_FOREST:
-					fertility = 45.0 + rainfall * 20.0
+					fertility = 45.0 + precipitation * 20.0
 
 				WorldData.BIOME_PLAIN:
-					fertility = 42.0 + rainfall * 22.0
+					fertility = 42.0 + precipitation * 22.0
 
 				WorldData.BIOME_TAIGA:
-					fertility = 35.0 + rainfall * 18.0
+					fertility = 35.0 + precipitation * 18.0
 
 				WorldData.BIOME_TUNDRA:
-					fertility = 5.0 + rainfall * 25.0
+					fertility = 5.0 + precipitation * 25.0
 
 				WorldData.BIOME_DESERT:
-					fertility = rainfall * 28.0
+					fertility = precipitation * 28.0
 
 				WorldData.BIOME_MOUNTAIN:
-					fertility = rainfall * 22.0
+					fertility = precipitation * 22.0
 
 			if is_near_river(world, x, y):
 				if biome == WorldData.BIOME_PLAIN or biome == WorldData.BIOME_FOREST or biome == WorldData.BIOME_JUNGLE:
