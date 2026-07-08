@@ -16,6 +16,15 @@ enum RegionCursorState {
 }
 
 var view_mode: ViewMode = ViewMode.BIOME
+var world_map_texture: ImageTexture
+var world_map_mode_textures: Dictionary = {}
+var world_texture_warmup_running: bool = false
+var world_texture_warmup_token: int = 0
+
+const WORLD_CURSOR_LOOK_FILL_COLOR: Color = Color(1.0, 1.0, 1.0, 0.08)
+const WORLD_CURSOR_LOOK_BORDER_COLOR: Color = Color(1.0, 1.0, 1.0, 0.58)
+const WORLD_CURSOR_LOOK_GRID_COLOR: Color = Color(1.0, 1.0, 1.0, 0.20)
+const WORLD_TEXTURE_WARMUP_ROWS_PER_FRAME: int = 24
 var settings := MapSettings.new()
 var world: WorldData
 var generator := WorldGenerator.new()
@@ -76,6 +85,7 @@ var debug_panel_padding: Vector2 = Vector2(12.0, 10.0)
 var debug_panel_min_size: Vector2 = Vector2(260.0, 80.0)
 
 func _ready():
+	texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
 	add_to_group("world_renderer")
 
 	RenderingServer.set_default_clear_color(abyss_color)
@@ -121,6 +131,7 @@ func load_locked_world_save() -> void:
 
 	print("Loaded locked official world seed: ", world.seed)
 
+	rebuild_world_map_textures()
 	configure_world_camera()
 	queue_redraw()
 
@@ -558,62 +569,117 @@ func _input(event):
 			toggle_debug_mode()
 			return
 
-		if event.keycode == KEY_1:
-			view_mode = ViewMode.BIOME
-			print("View: Biome")
-			update_debug_panel_text()
-			queue_redraw()
+		if key_event.keycode == KEY_1:
+			set_world_view_mode(ViewMode.BIOME)
 
-		elif event.keycode == KEY_2:
-			view_mode = ViewMode.ELEVATION
-			print("View: Elevation")
-			update_debug_panel_text()
-			queue_redraw()
+		elif key_event.keycode == KEY_2:
+			set_world_view_mode(ViewMode.ELEVATION)
 
-		elif event.keycode == KEY_3:
-			view_mode = ViewMode.TEMPERATURE
-			print("View: Temperature")
-			update_debug_panel_text()
-			queue_redraw()
+		elif key_event.keycode == KEY_3:
+			set_world_view_mode(ViewMode.TEMPERATURE)
 
-		elif event.keycode == KEY_4:
-			view_mode = ViewMode.PRECIPITATION
-			print("View: Precipitation")
-			update_debug_panel_text()
-			queue_redraw()
+		elif key_event.keycode == KEY_4:
+			set_world_view_mode(ViewMode.PRECIPITATION)
 
-		elif event.keycode == KEY_5:
-			view_mode = ViewMode.RESOURCES
-			print("View: Resources")
-			update_debug_panel_text()
-			queue_redraw()
+		elif key_event.keycode == KEY_5:
+			set_world_view_mode(ViewMode.RESOURCES)
 
-		elif event.keycode == KEY_6:
-			view_mode = ViewMode.FERTILITY
-			print("View: Fertility")
-			update_debug_panel_text()
-			queue_redraw()
+		elif key_event.keycode == KEY_6:
+			set_world_view_mode(ViewMode.FERTILITY)
+
+func set_world_view_mode(new_view_mode: int) -> void:
+	if view_mode == new_view_mode:
+		return
+
+	view_mode = new_view_mode
+
+	print("View: ", get_view_mode_name())
+
+	if world_texture_warmup_running:
+		world_texture_warmup_token += 1
+		world_texture_warmup_running = false
+
+	apply_cached_world_map_texture()
+	start_world_texture_warmup()
+
+	update_debug_panel_text()
+	queue_redraw()
+	
+func _exit_tree() -> void:
+	world_texture_warmup_token += 1
+	world_texture_warmup_running = false
+
+func get_all_world_view_modes() -> Array[int]:
+	return [
+		ViewMode.BIOME,
+		ViewMode.ELEVATION,
+		ViewMode.TEMPERATURE,
+		ViewMode.PRECIPITATION,
+		ViewMode.FERTILITY,
+		ViewMode.RESOURCES
+	]
 
 func _draw():
 	if world == null:
 		return
 
 	draw_abyss_background()
+	draw_world_map_texture()
 
-	for y in range(world.height):
-		for x in range(world.width):
-			var tile := world.get_tile(x, y)
-			var color := get_tile_color(tile)
+func draw_world_map_texture() -> void:
+	if world_map_texture == null:
+		return
 
-			draw_rect(
-				Rect2(
-					x * settings.tile_size,
-					y * settings.tile_size,
-					settings.tile_size,
-					settings.tile_size
-				),
-				color
-			)
+	var map_rect := Rect2(
+		Vector2.ZERO,
+		Vector2(
+			float(world.width * settings.tile_size),
+			float(world.height * settings.tile_size)
+		)
+	)
+
+	draw_texture_rect(world_map_texture, map_rect, false)
+
+func draw_world_inner_box_border(rect: Rect2, border_color: Color, border_width: float) -> void:
+	if rect.size.x <= 0.0 or rect.size.y <= 0.0:
+		return
+
+	var safe_width: float = minf(
+		border_width,
+		minf(rect.size.x * 0.5, rect.size.y * 0.5)
+	)
+
+	safe_width = maxf(safe_width, 0.01)
+
+	draw_rect(
+		Rect2(rect.position, Vector2(rect.size.x, safe_width)),
+		border_color,
+		true
+	)
+
+	draw_rect(
+		Rect2(
+			Vector2(rect.position.x, rect.position.y + rect.size.y - safe_width),
+			Vector2(rect.size.x, safe_width)
+		),
+		border_color,
+		true
+	)
+
+	draw_rect(
+		Rect2(rect.position, Vector2(safe_width, rect.size.y)),
+		border_color,
+		true
+	)
+
+	draw_rect(
+		Rect2(
+			Vector2(rect.position.x + rect.size.x - safe_width, rect.position.y),
+			Vector2(safe_width, rect.size.y)
+		),
+		border_color,
+		true
+	)
 
 func draw_abyss_background() -> void:
 	var map_width: float = float(world.width * settings.tile_size)
@@ -634,7 +700,11 @@ func draw_abyss_background() -> void:
 	)
 
 func get_tile_color(tile: Dictionary) -> Color:
-	match view_mode:
+	return get_tile_color_for_mode(tile, view_mode)
+
+
+func get_tile_color_for_mode(tile: Dictionary, mode: int) -> Color:
+	match mode:
 		ViewMode.BIOME:
 			return get_biome_color(tile)
 
@@ -654,6 +724,142 @@ func get_tile_color(tile: Dictionary) -> Color:
 			return get_resource_overlay_color(tile)
 
 	return Color.MAGENTA
+
+func rebuild_world_map_textures() -> void:
+	if world == null:
+		world_map_texture = null
+		world_map_mode_textures.clear()
+		return
+
+	if WorldData.has_valid_world_map_texture_cache(world):
+		world_map_mode_textures = WorldData.get_world_map_texture_cache()
+	else:
+		world_map_mode_textures.clear()
+
+	ensure_world_map_texture_for_mode(view_mode)
+	apply_cached_world_map_texture()
+
+	WorldData.store_world_map_texture_cache(world, world_map_mode_textures)
+
+	start_world_texture_warmup()
+
+	print("World map texture ready: ", get_view_mode_name())
+
+func ensure_world_map_texture_for_mode(mode: int) -> void:
+	if world == null:
+		return
+
+	if world_map_mode_textures.has(mode):
+		return
+
+	world_map_mode_textures[mode] = build_world_map_texture_for_mode(mode)
+	WorldData.store_world_map_texture_cache(world, world_map_mode_textures)
+
+func start_world_texture_warmup() -> void:
+	if world == null:
+		return
+
+	if world_texture_warmup_running:
+		return
+
+	world_texture_warmup_token += 1
+	warm_world_texture_cache_async(world_texture_warmup_token)
+
+
+func warm_world_texture_cache_async(token: int) -> void:
+	world_texture_warmup_running = true
+
+	await get_tree().process_frame
+	await get_tree().process_frame
+
+	var modes := get_all_world_view_modes()
+
+	for mode in modes:
+		if token != world_texture_warmup_token:
+			world_texture_warmup_running = false
+			return
+
+		if not is_inside_tree():
+			world_texture_warmup_running = false
+			return
+
+		if world == null:
+			world_texture_warmup_running = false
+			return
+
+		if world_map_mode_textures.has(mode):
+			continue
+
+		var image := Image.create(world.width, world.height, false, Image.FORMAT_RGBA8)
+
+		for y in range(world.height):
+			var row: Array = world.tiles[y]
+
+			for x in range(world.width):
+				var tile: Dictionary = row[x]
+				image.set_pixel(x, y, get_tile_color_for_mode(tile, mode))
+
+			if y % WORLD_TEXTURE_WARMUP_ROWS_PER_FRAME == 0:
+				await get_tree().process_frame
+
+				if token != world_texture_warmup_token:
+					world_texture_warmup_running = false
+					return
+
+				if not is_inside_tree():
+					world_texture_warmup_running = false
+					return
+
+		world_map_mode_textures[mode] = ImageTexture.create_from_image(image)
+		WorldData.store_world_map_texture_cache(world, world_map_mode_textures)
+
+		print("Warmed world map texture: ", get_world_view_mode_name_for_mode(mode))
+
+	world_texture_warmup_running = false
+	print("World map texture warmup complete.")
+
+func build_world_map_texture_for_mode(mode: int) -> ImageTexture:
+	var image := Image.create(world.width, world.height, false, Image.FORMAT_RGBA8)
+
+	for y in range(world.height):
+		var row: Array = world.tiles[y]
+
+		for x in range(world.width):
+			var tile: Dictionary = row[x]
+			image.set_pixel(x, y, get_tile_color_for_mode(tile, mode))
+
+	return ImageTexture.create_from_image(image)
+
+
+func apply_cached_world_map_texture() -> void:
+	if world == null:
+		world_map_texture = null
+		return
+
+	ensure_world_map_texture_for_mode(view_mode)
+	world_map_texture = world_map_mode_textures[view_mode]
+
+func get_world_view_mode_name_for_mode(mode: int) -> String:
+	match mode:
+		ViewMode.BIOME:
+			return "Biome"
+
+		ViewMode.ELEVATION:
+			return "Elevation"
+
+		ViewMode.TEMPERATURE:
+			return "Temperature"
+
+		ViewMode.PRECIPITATION:
+			return "Precipitation"
+
+		ViewMode.FERTILITY:
+			return "Fertility"
+
+		ViewMode.RESOURCES:
+			return "Resources"
+
+	return "Unknown"
 
 func get_fertility_overlay_color(tile: Dictionary) -> Color:
 	var biome: String = tile["biome"]
@@ -991,6 +1197,8 @@ func on_generate_world_button_pressed() -> void:
 	if region_cursor_line != null:
 		region_cursor_line.visible = false
 
+	WorldData.clear_visual_texture_caches()
+
 	world = generator.generate_world()
 	print("Generated world seed: ", world.seed)
 
@@ -1005,6 +1213,7 @@ func on_generate_world_button_pressed() -> void:
 	if has_method("update_debug_panel_text"):
 		call("update_debug_panel_text")
 
+	rebuild_world_map_textures()
 	configure_world_camera()
 	queue_redraw()
 

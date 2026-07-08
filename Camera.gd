@@ -4,7 +4,7 @@ class_name StrategyCamera2D
 @export var move_speed: float = 650.0
 @export var zoom_speed: float = 0.15
 @export var min_zoom: float = 0.25
-@export var max_zoom: float = 5.0
+@export var max_zoom: float = 80.0
 
 @export var edge_scroll_enabled: bool = true
 @export var edge_scroll_margin: float = 25.0
