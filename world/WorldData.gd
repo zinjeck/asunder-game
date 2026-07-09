@@ -69,6 +69,7 @@ static var next_city_object_id: int = 1
 
 const CITY_OBJECT_CITY_CENTER := "city_center"
 const CITY_OBJECT_HOUSE := "house"
+const CITY_OBJECT_STOCKPILE := "stockpile"
 const CITY_OBJECT_PLACEHOLDER_BUILDING := "placeholder_building"
 const CITY_OBJECT_ROAD := "road"
 const CITY_OBJECT_PLACEMENT_EFFECT_NONE := "none"
@@ -77,66 +78,72 @@ static func ensure_city_object_definitions_ready() -> void:
 	if city_object_definitions.is_empty():
 		setup_city_object_definitions()
 
-
 static func setup_city_object_definitions() -> void:
 	city_object_definitions.clear()
 
-	city_object_definitions[CITY_OBJECT_CITY_CENTER] = make_city_object_definition(
-		CITY_OBJECT_CITY_CENTER,
-		"City Keep",
-		Vector2i(2, 6),
-		1,
-		false,
-		true,
-		false,
-		CITY_OBJECT_PLACEMENT_EFFECT_FOUND_CITY,
-		Color(0.32, 0.30, 0.24, 0.95),
-		Color(0.86, 0.84, 0.76, 0.55),
-		0.35
-	)
+	city_object_definitions[CITY_OBJECT_CITY_CENTER] = make_city_object_definition({
+		"type": CITY_OBJECT_CITY_CENTER,
+		"display_name": "City Keep",
+		"size": Vector2i(2, 6),
+		"button_slot": 1,
+		"requires_city": false,
+		"requires_no_city": true,
+		"repeat_after_place": false,
+		"placement_effect": CITY_OBJECT_PLACEMENT_EFFECT_FOUND_CITY,
+		"frame_color": Color(0.32, 0.30, 0.24, 0.95),
+		"fill_color": Color(0.86, 0.84, 0.76, 0.55),
+		"frame_thickness": 0.35
+	})
 
-	city_object_definitions[CITY_OBJECT_HOUSE] = make_city_object_definition(
-		CITY_OBJECT_HOUSE,
-		"House",
-		Vector2i(3, 3),
-		3,
-		true,
-		false,
-		true,
-		CITY_OBJECT_PLACEMENT_EFFECT_NONE,
-		Color(0.32, 0.30, 0.24, 0.95),
-		Color(0.86, 0.84, 0.76, 0.55),
-		0.30
-	)
+	city_object_definitions[CITY_OBJECT_HOUSE] = make_city_object_definition({
+		"type": CITY_OBJECT_HOUSE,
+		"display_name": "House",
+		"size": Vector2i(3, 3),
+		"button_slot": 3,
+		"requires_city": true,
+		"requires_no_city": false,
+		"repeat_after_place": true,
+		"placement_effect": CITY_OBJECT_PLACEMENT_EFFECT_NONE,
+		"frame_color": Color(0.32, 0.30, 0.24, 0.95),
+		"fill_color": Color(0.86, 0.84, 0.76, 0.55),
+		"frame_thickness": 0.30
+	})
+
+	city_object_definitions[CITY_OBJECT_STOCKPILE] = make_city_object_definition({
+		"type": CITY_OBJECT_STOCKPILE,
+		"display_name": "Stockpile",
+		"size": Vector2i(2, 2),
+		"button_slot": 4,
+		"requires_city": true,
+		"requires_no_city": false,
+		"repeat_after_place": true,
+		"placement_effect": CITY_OBJECT_PLACEMENT_EFFECT_NONE,
+		"frame_color": Color(0.46, 0.30, 0.12, 0.95),
+		"fill_color": Color(0.82, 0.64, 0.32, 0.55),
+		"frame_thickness": 0.30
+	})
 
 
-static func make_city_object_definition(
-	object_type: String,
-	display_name: String,
-	size_tiles: Vector2i,
-	button_slot: int,
-	requires_city: bool,
-	requires_no_city: bool,
-	repeat_after_place: bool,
-	placement_effect: String,
-	frame_color: Color,
-	fill_color: Color,
-	frame_thickness: float
-) -> Dictionary:
+static func make_city_object_definition(values: Dictionary) -> Dictionary:
+	var object_type: String = str(values.get("type", ""))
+
+	if object_type.is_empty():
+		push_error("City object definition is missing a type.")
+		return {}
+
 	return {
 		"type": object_type,
-		"display_name": display_name,
-		"size": size_tiles,
-		"button_slot": button_slot,
-		"requires_city": requires_city,
-		"requires_no_city": requires_no_city,
-		"repeat_after_place": repeat_after_place,
-		"placement_effect": placement_effect,
-		"frame_color": frame_color,
-		"fill_color": fill_color,
-		"frame_thickness": frame_thickness
+		"display_name": str(values.get("display_name", object_type.capitalize())),
+		"size": values.get("size", Vector2i.ONE),
+		"button_slot": int(values.get("button_slot", 0)),
+		"requires_city": bool(values.get("requires_city", false)),
+		"requires_no_city": bool(values.get("requires_no_city", false)),
+		"repeat_after_place": bool(values.get("repeat_after_place", false)),
+		"placement_effect": str(values.get("placement_effect", CITY_OBJECT_PLACEMENT_EFFECT_NONE)),
+		"frame_color": values.get("frame_color", Color(0.32, 0.30, 0.24, 0.95)),
+		"fill_color": values.get("fill_color", Color(0.86, 0.84, 0.76, 0.55)),
+		"frame_thickness": float(values.get("frame_thickness", 0.30))
 	}
-
 
 static func get_city_object_definition(object_type: String) -> Dictionary:
 	ensure_city_object_definitions_ready()

@@ -67,9 +67,7 @@ var selected_region_border_color := Color(0.0, 1.0, 1.0, 1.0)
 var region_cursor_border_width: float = 1.25
 var selected_region_border_width: float = 2.0
 
-var debug_canvas_layer: CanvasLayer
-var debug_panel: Panel
-var debug_label: Label
+var debug_panel_ui: DebugPanel
 var debug_panel_position: Vector2 = Vector2.ZERO
 var debug_panel_padding: Vector2 = Vector2(12.0, 10.0)
 var debug_panel_min_size: Vector2 = Vector2(260.0, 80.0)
@@ -153,79 +151,33 @@ func create_region_selection_lines() -> void:
 	add_child(selected_region_line)
 
 func create_debug_panel() -> void:
-	debug_canvas_layer = CanvasLayer.new()
-	debug_canvas_layer.layer = 100
-	add_child(debug_canvas_layer)
-
-	debug_panel = Panel.new()
-	debug_panel.position = debug_panel_position
-	debug_panel.visible = WorldData.debug_mode_enabled
-	debug_panel.mouse_filter = Control.MOUSE_FILTER_IGNORE
-
-	var panel_style: StyleBoxFlat = StyleBoxFlat.new()
-	panel_style.bg_color = Color(0.0, 0.0, 0.0, 0.68)
-	panel_style.border_color = Color(0.0, 0.55, 1.0, 0.55)
-	panel_style.set_border_width_all(1)
-	panel_style.set_corner_radius_all(6)
-
-	debug_panel.add_theme_stylebox_override("panel", panel_style)
-	debug_canvas_layer.add_child(debug_panel)
-
-	debug_label = Label.new()
-	debug_label.position = debug_panel_padding
-	debug_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	debug_label.autowrap_mode = TextServer.AUTOWRAP_OFF
-	debug_label.clip_text = false
-	debug_label.add_theme_color_override("font_color", Color(0.82, 0.94, 1.0, 1.0))
-	debug_label.add_theme_font_size_override("font_size", 13)
-	debug_label.text = "DEBUG MENU"
-
-	debug_panel.add_child(debug_label)
-	fit_debug_panel_to_text()
+	debug_panel_ui = DebugPanel.new()
+	debug_panel_ui.setup(
+		self,
+		100,
+		debug_panel_position,
+		debug_panel_padding,
+		debug_panel_min_size,
+		"DEBUG MENU",
+		Callable(self, "get_hovered_tile_debug_text")
+	)
 
 func toggle_debug_mode() -> void:
-	WorldData.debug_mode_enabled = not WorldData.debug_mode_enabled
+	if debug_panel_ui == null:
+		return
 
-	if debug_panel != null:
-		debug_panel.visible = WorldData.debug_mode_enabled
+	var is_enabled := debug_panel_ui.toggle_enabled()
 
-	update_debug_panel_text()
-
-	if WorldData.debug_mode_enabled:
+	if is_enabled:
 		print("Debug mode: ON")
 	else:
 		print("Debug mode: OFF")
 
 func update_debug_panel_text() -> void:
-	if not WorldData.debug_mode_enabled:
+	if debug_panel_ui == null:
 		return
 
-	if debug_label == null:
-		return
-
-	debug_label.text = get_hovered_tile_debug_text()
-	fit_debug_panel_to_text()
-
-func fit_debug_panel_to_text() -> void:
-	if debug_panel == null:
-		return
-
-	if debug_label == null:
-		return
-
-	var label_size: Vector2 = debug_label.get_combined_minimum_size()
-	var panel_size: Vector2 = label_size + debug_panel_padding * 2.0
-
-	if panel_size.x < debug_panel_min_size.x:
-		panel_size.x = debug_panel_min_size.x
-
-	if panel_size.y < debug_panel_min_size.y:
-		panel_size.y = debug_panel_min_size.y
-
-	debug_panel.size = panel_size
-	debug_label.position = debug_panel_padding
-	debug_label.size = label_size
-
+	debug_panel_ui.refresh()
 
 func get_hovered_tile_debug_text() -> String:
 	if world == null:
@@ -273,21 +225,14 @@ func get_hovered_tile_debug_text() -> String:
 		+ "Precipitation: " + "%.3f" % precipitation + "\n"
 		+ "Fertility: " + fertility_text + "\n"
 		+ "\n"
-		+ "Land: " + bool_to_yes_no(is_land) + "\n"
-		+ "River: " + bool_to_yes_no(is_river) + "\n"
-		+ "Coastal: " + bool_to_yes_no(is_coastal)
+		+ "Land: " + DebugPanel.bool_to_yes_no(is_land) + "\n"
+		+ "River: " + DebugPanel.bool_to_yes_no(is_river) + "\n"
+		+ "Coastal: " + DebugPanel.bool_to_yes_no(is_coastal)
 	)
 
 
 func get_view_mode_name() -> String:
 	return MapVisuals.get_view_mode_name(view_mode)
-
-func bool_to_yes_no(value: bool) -> String:
-	if value:
-		return "Yes"
-
-	return "No"
-
 
 func is_tile_coastal(tile_x: int, tile_y: int) -> bool:
 	if world == null:

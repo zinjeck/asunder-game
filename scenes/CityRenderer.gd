@@ -17,8 +17,7 @@ var biome_edge_noise := FastNoiseLite.new()
 var camera: Camera2D
 var ui_layer: CanvasLayer
 var ui_root: Control
-var bottom_button_one: Button
-var bottom_button_two: Button
+
 var back_button: Button
 var resource_bar: Control
 var resource_boxes: Array[Panel] = []
@@ -34,10 +33,7 @@ var city_terrain_texture: ImageTexture
 var city_map_mode_textures: Dictionary = {}
 var city_texture_warmup_running: bool = false
 var city_texture_warmup_token: int = 0
-var debug_canvas_layer: CanvasLayer
-var debug_panel: Panel
-var debug_label: Label
-
+var debug_panel_ui: DebugPanel
 var debug_panel_position: Vector2 = Vector2.ZERO
 var debug_panel_padding: Vector2 = Vector2(12.0, 10.0)
 var debug_panel_min_size: Vector2 = Vector2(330.0, 170.0)
@@ -49,7 +45,10 @@ var is_road_placement_active: bool = false
 var is_road_dragging: bool = false
 var road_preview_tiles: Array = []
 var road_preview_lookup: Dictionary = {}
+var bottom_button_one: Button
+var bottom_button_two: Button
 var bottom_button_three: Button
+var bottom_button_four: Button
 var road_drag_start_tile: Vector2i = Vector2i(-1, -1)
 var road_drag_current_tile: Vector2i = Vector2i(-1, -1)
 var city_object_option_buttons: Dictionary = {}
@@ -477,6 +476,7 @@ func create_city_ui() -> void:
 	create_city_object_option_button(WorldData.CITY_OBJECT_CITY_CENTER)
 	create_build_option_button()
 	create_city_object_option_button(WorldData.CITY_OBJECT_HOUSE)
+	create_city_object_option_button(WorldData.CITY_OBJECT_STOCKPILE)
 	create_resource_bar()
 	create_city_maps_menu()
 	create_object_info_panel()
@@ -559,6 +559,14 @@ func create_bottom_city_buttons() -> void:
 	ui_root.add_child(bottom_button_three)
 	bottom_button_three.pressed.connect(on_city_object_menu_button_pressed.bind(WorldData.CITY_OBJECT_HOUSE))
 
+	bottom_button_four = Button.new()
+	bottom_button_four.text = "4"
+	bottom_button_four.focus_mode = Control.FOCUS_NONE
+	bottom_button_four.custom_minimum_size = Vector2(58.0, 58.0)
+	bottom_button_four.mouse_filter = Control.MOUSE_FILTER_STOP
+	ui_root.add_child(bottom_button_four)
+	bottom_button_four.pressed.connect(on_city_object_menu_button_pressed.bind(WorldData.CITY_OBJECT_STOCKPILE))
+
 func create_city_object_option_button(object_type: String) -> void:
 	var definition := WorldData.get_city_object_definition(object_type)
 
@@ -603,7 +611,6 @@ func create_city_object_option_button(object_type: String) -> void:
 	city_object_option_buttons[object_type] = option_button
 	city_object_option_icons[object_type] = icon
 
-
 func get_bottom_button_for_slot(button_slot: int) -> Button:
 	match button_slot:
 		1:
@@ -612,9 +619,10 @@ func get_bottom_button_for_slot(button_slot: int) -> Button:
 			return bottom_button_two
 		3:
 			return bottom_button_three
+		4:
+			return bottom_button_four
 
 	return null
-
 
 func layout_city_object_option_button(object_type: String, _viewport_size: Vector2) -> void:
 	if not city_object_option_buttons.has(object_type):
@@ -1117,18 +1125,23 @@ func set_city_object_option_selected(object_type: String, is_selected: bool) -> 
 
 	icon.add_theme_stylebox_override("panel", icon_style)
 
-
 func update_city_object_button_states() -> void:
-	var city_center_definition := WorldData.get_city_object_definition(WorldData.CITY_OBJECT_CITY_CENTER)
-	var house_definition := WorldData.get_city_object_definition(WorldData.CITY_OBJECT_HOUSE)
+	var city_object_main_buttons := {
+		WorldData.CITY_OBJECT_CITY_CENTER: bottom_button_one,
+		WorldData.CITY_OBJECT_HOUSE: bottom_button_three,
+		WorldData.CITY_OBJECT_STOCKPILE: bottom_button_four
+	}
 
-	if not city_center_definition.is_empty() and bottom_button_one != null:
-		bottom_button_one.disabled = not WorldData.can_use_city_object_definition(WorldData.CITY_OBJECT_CITY_CENTER)
-		bottom_button_one.text = "1"
+	for object_type in city_object_main_buttons.keys():
+		var object_type_string := str(object_type)
+		var definition := WorldData.get_city_object_definition(object_type_string)
+		var main_button: Button = city_object_main_buttons[object_type_string]
 
-	if not house_definition.is_empty() and bottom_button_three != null:
-		bottom_button_three.disabled = not WorldData.can_use_city_object_definition(WorldData.CITY_OBJECT_HOUSE)
-		bottom_button_three.text = "3"
+		if definition.is_empty() or main_button == null:
+			continue
+
+		main_button.disabled = not WorldData.can_use_city_object_definition(object_type_string)
+		main_button.text = str(int(definition.get("button_slot", 0)))
 
 	for object_type in city_object_option_buttons.keys():
 		var object_type_string := str(object_type)
@@ -1264,13 +1277,18 @@ func update_object_selection_box_visual() -> void:
 	object_selection_box_panel.move_to_front()
 
 func layout_bottom_buttons(viewport_size: Vector2) -> void:
-	if bottom_button_one == null or bottom_button_two == null or bottom_button_three == null:
+	if (
+		bottom_button_one == null
+		or bottom_button_two == null
+		or bottom_button_three == null
+		or bottom_button_four == null
+	):
 		return
 
 	var button_size := 58.0
 	var gap := 0.0
 
-	var total_width := button_size * 3.0 + gap * 2.0
+	var total_width := button_size * 4.0 + gap * 3.0
 	var start_x := viewport_size.x * 0.5 - total_width * 0.5
 	var y := viewport_size.y - button_size
 
@@ -1283,6 +1301,8 @@ func layout_bottom_buttons(viewport_size: Vector2) -> void:
 	bottom_button_three.position = Vector2(start_x + (button_size + gap) * 2.0, y)
 	bottom_button_three.size = Vector2(button_size, button_size)
 
+	bottom_button_four.position = Vector2(start_x + (button_size + gap) * 3.0, y)
+	bottom_button_four.size = Vector2(button_size, button_size)
 
 func layout_resource_bar(viewport_size: Vector2) -> void:
 	if resource_bar == null:
@@ -2967,80 +2987,35 @@ func update_city_hover_visual() -> void:
 	hover_tile_outline.move_to_front()
 
 func update_debug_panel_text() -> void:
-	if not WorldData.debug_mode_enabled:
+	if debug_panel_ui == null:
 		return
 
-	if debug_label == null:
-		return
-
-	debug_label.text = get_city_debug_panel_text()
-	fit_debug_panel_to_text()
+	debug_panel_ui.refresh()
 
 func create_debug_panel() -> void:
-	debug_canvas_layer = CanvasLayer.new()
-	debug_canvas_layer.layer = 120
-	add_child(debug_canvas_layer)
-
-	debug_panel = Panel.new()
-	debug_panel.position = debug_panel_position
-	debug_panel.visible = WorldData.debug_mode_enabled
-	debug_panel.mouse_filter = Control.MOUSE_FILTER_IGNORE
-
-	var panel_style := StyleBoxFlat.new()
-	panel_style.bg_color = Color(0.0, 0.0, 0.0, 0.68)
-	panel_style.border_color = Color(0.0, 0.55, 1.0, 0.55)
-	panel_style.set_border_width_all(1)
-	panel_style.set_corner_radius_all(6)
-
-	debug_panel.add_theme_stylebox_override("panel", panel_style)
-	debug_canvas_layer.add_child(debug_panel)
-
-	debug_label = Label.new()
-	debug_label.position = debug_panel_padding
-	debug_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	debug_label.autowrap_mode = TextServer.AUTOWRAP_OFF
-	debug_label.clip_text = false
-	debug_label.add_theme_color_override("font_color", Color(0.82, 0.94, 1.0, 1.0))
-	debug_label.add_theme_font_size_override("font_size", 13)
-	debug_label.text = "DEBUG INFO"
-
-	debug_panel.add_child(debug_label)
-	fit_debug_panel_to_text()
+	debug_panel_ui = DebugPanel.new()
+	debug_panel_ui.setup(
+		self,
+		120,
+		debug_panel_position,
+		debug_panel_padding,
+		debug_panel_min_size,
+		"DEBUG INFO",
+		Callable(self, "get_city_debug_panel_text")
+	)
 
 func toggle_debug_mode() -> void:
-	WorldData.debug_mode_enabled = not WorldData.debug_mode_enabled
+	if debug_panel_ui == null:
+		return
 
-	if debug_panel != null:
-		debug_panel.visible = WorldData.debug_mode_enabled
-
-	update_debug_panel_text()
+	var is_enabled := debug_panel_ui.toggle_enabled()
 	queue_redraw()
 
-	if WorldData.debug_mode_enabled:
+	if is_enabled:
 		print("Debug mode: ON")
 	else:
 		print("Debug mode: OFF")
 
-func fit_debug_panel_to_text() -> void:
-	if debug_panel == null:
-		return
-
-	if debug_label == null:
-		return
-
-	var label_size: Vector2 = debug_label.get_combined_minimum_size()
-	var panel_size: Vector2 = label_size + debug_panel_padding * 2.0
-
-	if panel_size.x < debug_panel_min_size.x:
-		panel_size.x = debug_panel_min_size.x
-
-	if panel_size.y < debug_panel_min_size.y:
-		panel_size.y = debug_panel_min_size.y
-
-	debug_panel.size = panel_size
-	debug_label.position = debug_panel_padding
-	debug_label.size = label_size
-	
 func get_city_debug_panel_text() -> String:
 	if city_world == null:
 		return "DEBUG INFO\nScene: City\nCity world: not generated"
@@ -3087,9 +3062,9 @@ func get_city_debug_panel_text() -> String:
 		+ "Precipitation: " + "%.3f" % float(tile.get("precipitation", 0.0)) + "\n"
 		+ "Fertility: " + fertility_text + "\n"
 		+ "\n"
-		+ "Land: " + debug_bool_to_yes_no(bool(tile.get("is_land", false))) + "\n"
-		+ "Buildable 1x1: " + debug_bool_to_yes_no(WorldData.can_place_city_object(city_world, hovered_city_tile, Vector2i(1, 1))) + "\n"
-		+ "Road placeable: " + debug_bool_to_yes_no(WorldData.can_place_city_road_tile(city_world, hovered_city_tile)) + "\n"
+		+ "Land: " + DebugPanel.bool_to_yes_no(bool(tile.get("is_land", false))) + "\n"
+		+ "Buildable 1x1: " + DebugPanel.bool_to_yes_no(WorldData.can_place_city_object(city_world, hovered_city_tile, Vector2i(1, 1))) + "\n"
+		+ "Road placeable: " + DebugPanel.bool_to_yes_no(WorldData.can_place_city_road_tile(city_world, hovered_city_tile)) + "\n"
 		+ "\n"
 		+ object_text
 		+ "\n"
@@ -3133,10 +3108,3 @@ func get_city_debug_selection_text() -> String:
 		"Selected object: " + get_city_object_display_name(selected_object) + "\n"
 		+ "Selected id: " + str(selected_city_object_id) + "\n"
 	)
-
-
-func debug_bool_to_yes_no(value: bool) -> String:
-	if value:
-		return "Yes"
-
-	return "No"
