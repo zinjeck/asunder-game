@@ -185,6 +185,17 @@ const CITY_OBJECT_SHAPE_RECTANGLE := "rectangle"
 const CITY_OBJECT_SHAPE_TILE_AREA := "tile_area"
 const WORKPLACE_KIND_NONE := "none"
 const WORKPLACE_KIND_GATHERING := "gathering"
+const WORKPLACE_RESOURCE_SOURCE_MODE_NONE := "none"
+const WORKPLACE_RESOURCE_SOURCE_MODE_RADIUS := "radius"
+const WORKPLACE_ANCHOR_MODE_FOOTPRINT_CENTER := "footprint_center"
+const WORKPLACE_WORK_LOCATION_MODE_NONE := "none"
+const WORKPLACE_WORK_LOCATION_MODE_RESOURCE_SOURCE_TILES := "resource_source_tiles"
+const WORKPLACE_WORK_MOVEMENT_MODE_NONE := "none"
+const WORKPLACE_WORK_MOVEMENT_MODE_MOVE_BETWEEN_WORK_POINTS := "move_between_work_points"
+const WORKPLACE_BREAK_LOCATION_MODE_NONE := "none"
+const WORKPLACE_BREAK_LOCATION_MODE_FOOTPRINT_RADIUS := "footprint_radius"
+const WORKPLACE_OVERFLOW_MODE_NONE := "none"
+const WORKPLACE_OVERFLOW_MODE_FOOTPRINT_RADIUS := "footprint_radius"
 const CONTAINER_TYPE_NONE := "none"
 const CONTAINER_TYPE_PUBLIC_CITY_STORAGE := "public_city_storage"
 const CONTAINER_TYPE_PRIVATE_HOME_STORAGE := "private_home_storage"
@@ -271,11 +282,50 @@ static func setup_city_object_definitions() -> void:
 		"workplace_kind": WORKPLACE_KIND_GATHERING,
 		"worker_capacity": 4,
 		"output_resource": RESOURCE_FISH,
+		"production_recipe": {
+			"inputs": {},
+			"outputs": {
+				RESOURCE_FISH: 1
+			},
+			"work_units_per_batch": 60000
+		},
+		"resource_source_policy": {
+			"mode": WORKPLACE_RESOURCE_SOURCE_MODE_RADIUS,
+			"resource_type": RESOURCE_FISH,
+			"radius_tiles": 8,
+			"anchor_mode": WORKPLACE_ANCHOR_MODE_FOOTPRINT_CENTER
+		},
+		"work_location_policy": {
+			"mode": WORKPLACE_WORK_LOCATION_MODE_RESOURCE_SOURCE_TILES
+		},
+		"work_movement_policy": {
+			"mode": WORKPLACE_WORK_MOVEMENT_MODE_MOVE_BETWEEN_WORK_POINTS
+		},
+		"break_location_policy": {
+			"mode": WORKPLACE_BREAK_LOCATION_MODE_FOOTPRINT_RADIUS,
+			"radius_tiles": 3
+		},
+		"overflow_policy": {
+			"mode": WORKPLACE_OVERFLOW_MODE_FOOTPRINT_RADIUS,
+			"radius_tiles": 2
+		},
 		"storage_resources": [
 			RESOURCE_FISH
 		],
 		"storage_capacity_per_resource": 50
 	})
+
+static func _copy_dictionary_field(
+	source: Dictionary,
+	field_name: String
+) -> Dictionary:
+	var raw_value = source.get(field_name, {})
+
+	if not raw_value is Dictionary:
+		return {}
+
+	var dictionary_value: Dictionary = raw_value
+	return dictionary_value.duplicate(true)
 
 static func make_city_object_definition(values: Dictionary) -> Dictionary:
 	var object_type: String = str(values.get("type", ""))
@@ -318,7 +368,13 @@ static func make_city_object_definition(values: Dictionary) -> Dictionary:
 		"is_workplace": is_workplace,
 		"workplace_kind": str(values.get("workplace_kind", WORKPLACE_KIND_NONE)),
 		"worker_capacity": int(values.get("worker_capacity", 0)),
-		"output_resource": str(values.get("output_resource", RESOURCE_NONE))
+		"output_resource": str(values.get("output_resource", RESOURCE_NONE)),
+		"production_recipe": _copy_dictionary_field(values, "production_recipe"),
+		"resource_source_policy": _copy_dictionary_field(values, "resource_source_policy"),
+		"work_location_policy": _copy_dictionary_field(values, "work_location_policy"),
+		"work_movement_policy": _copy_dictionary_field(values, "work_movement_policy"),
+		"break_location_policy": _copy_dictionary_field(values, "break_location_policy"),
+		"overflow_policy": _copy_dictionary_field(values, "overflow_policy")
 	}
 
 static func get_city_object_definition(object_type: String) -> Dictionary:
@@ -1196,6 +1252,75 @@ static func get_city_object_output_resource(city_object: Dictionary) -> String:
 
 	var definition := get_city_object_definition_from_object(city_object)
 	return str(definition.get("output_resource", RESOURCE_NONE))
+
+
+static func _get_city_object_definition_dictionary(
+	city_object: Dictionary,
+	definition_field: String
+) -> Dictionary:
+	if city_object.is_empty():
+		return {}
+
+	var definition := get_city_object_definition_from_object(city_object)
+
+	if definition.is_empty():
+		return {}
+
+	return _copy_dictionary_field(definition, definition_field)
+
+
+static func get_city_object_production_recipe(
+	city_object: Dictionary
+) -> Dictionary:
+	return _get_city_object_definition_dictionary(
+		city_object,
+		"production_recipe"
+	)
+
+
+static func get_city_object_resource_source_policy(
+	city_object: Dictionary
+) -> Dictionary:
+	return _get_city_object_definition_dictionary(
+		city_object,
+		"resource_source_policy"
+	)
+
+
+static func get_city_object_work_location_policy(
+	city_object: Dictionary
+) -> Dictionary:
+	return _get_city_object_definition_dictionary(
+		city_object,
+		"work_location_policy"
+	)
+
+
+static func get_city_object_work_movement_policy(
+	city_object: Dictionary
+) -> Dictionary:
+	return _get_city_object_definition_dictionary(
+		city_object,
+		"work_movement_policy"
+	)
+
+
+static func get_city_object_break_location_policy(
+	city_object: Dictionary
+) -> Dictionary:
+	return _get_city_object_definition_dictionary(
+		city_object,
+		"break_location_policy"
+	)
+
+
+static func get_city_object_overflow_policy(
+	city_object: Dictionary
+) -> Dictionary:
+	return _get_city_object_definition_dictionary(
+		city_object,
+		"overflow_policy"
+	)
 
 
 static func get_city_object_worker_ids(city_object: Dictionary) -> Array:
