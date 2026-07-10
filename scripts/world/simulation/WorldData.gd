@@ -66,13 +66,22 @@ static var city_resource_amounts: Dictionary = {}
 
 static var city_objects: Array = []
 static var city_object_index_by_id: Dictionary = {}
-static var city_storage_version: int = 0
 static var city_occupied_tiles: Dictionary = {}
 static var next_city_object_id: int = 1
 
 static var city_citizens: Array = []
 static var city_citizen_index_by_id: Dictionary = {}
 static var next_city_citizen_id: int = 1
+
+# Focused change versions.
+#
+# These let observers refresh only the parts of the city that actually
+# changed instead of treating every mutation as a generic storage change.
+static var city_object_version: int = 0
+static var city_container_version: int = 0
+static var city_public_storage_version: int = 0
+static var city_citizen_version: int = 0
+static var city_assignment_version: int = 0
 static var city_citizen_first_name_pool: Array = [
 	"Arlen",
 	"Tovan",
@@ -521,7 +530,7 @@ static func found_player_city(
 		"founded": true
 	}
 
-	ensure_starting_city_population()
+	initialize_starting_city_population()
 
 static func has_player_city_foundation() -> bool:
 	return (
@@ -607,6 +616,26 @@ static func get_total_stored_city_resource_amount(resource: String) -> int:
 
 static func get_total_city_resource_storage_capacity(resource: String) -> int:
 	return get_total_public_city_resource_storage_capacity(resource)
+
+static func _mark_city_objects_changed() -> void:
+	city_object_version += 1
+
+
+static func _mark_city_container_changed(
+	city_object: Dictionary
+) -> void:
+	city_container_version += 1
+
+	if city_object_counts_as_public_city_storage(city_object):
+		city_public_storage_version += 1
+
+
+static func _mark_city_citizens_changed() -> void:
+	city_citizen_version += 1
+
+
+static func _mark_city_assignments_changed() -> void:
+	city_assignment_version += 1
 
 static func rebuild_city_object_index() -> void:
 	city_object_index_by_id.clear()
@@ -839,6 +868,9 @@ static func reset_city_citizen_state() -> void:
 	city_citizen_index_by_id.clear()
 	next_city_citizen_id = 1
 
+	_mark_city_citizens_changed()
+	_mark_city_assignments_changed()
+
 static func make_empty_citizen_inventory() -> Dictionary:
 	return make_empty_resource_container(get_city_resource_types())
 
@@ -933,7 +965,6 @@ static func make_city_citizen(display_name: String = "") -> Dictionary:
 	next_city_citizen_id += 1
 	return citizen
 
-
 static func add_city_citizen(display_name: String = "") -> Dictionary:
 	var citizen := make_city_citizen(display_name)
 
@@ -942,23 +973,37 @@ static func add_city_citizen(display_name: String = "") -> Dictionary:
 	var citizen_index := city_citizens.size() - 1
 	_register_city_citizen_index(citizen, citizen_index)
 
+	_mark_city_citizens_changed()
+
 	return citizen
 
-static func ensure_starting_city_population() -> void:
+static func initialize_starting_city_population() -> int:
+	if not player_city_founded:
+		push_error(
+			"Cannot initialize the starting population before the city is founded."
+		)
+		return 0
+
 	if not city_citizens.is_empty():
-		return
+		return 0
+
+	var created_count := 0
 
 	for _index in range(STARTING_CITY_POPULATION):
-		add_city_citizen()
+		var citizen := add_city_citizen()
 
+		if citizen.is_empty():
+			continue
+
+		created_count += 1
+
+	return created_count
 
 static func get_city_population_count() -> int:
-	ensure_starting_city_population()
 	return city_citizens.size()
 
 
 static func get_city_housed_citizen_count() -> int:
-	ensure_starting_city_population()
 
 	var housed_count := 0
 
@@ -973,7 +1018,6 @@ static func get_city_housed_citizen_count() -> int:
 
 
 static func get_city_unemployed_citizen_count() -> int:
-	ensure_starting_city_population()
 
 	var unemployed_count := 0
 
@@ -990,7 +1034,6 @@ static func get_city_unemployed_citizen_count() -> int:
 	return unemployed_count
 
 static func get_city_citizen_by_id(citizen_id: int) -> Dictionary:
-	ensure_starting_city_population()
 
 	var citizen_index := get_city_citizen_index_by_id(citizen_id)
 
@@ -1014,7 +1057,6 @@ static func get_city_citizen_display_name(citizen_id: int) -> String:
 
 
 static func get_city_citizen_snapshot() -> Array:
-	ensure_starting_city_population()
 
 	var citizen_snapshot := []
 
@@ -1052,8 +1094,6 @@ static func get_city_object_resident_count(city_object: Dictionary) -> int:
 	if object_id < 0:
 		return 0
 
-	ensure_starting_city_population()
-
 	var resident_count := 0
 
 	for citizen in city_citizens:
@@ -1084,8 +1124,6 @@ static func get_city_object_resident_ids(city_object: Dictionary) -> Array:
 
 	if object_id < 0:
 		return resident_ids
-
-	ensure_starting_city_population()
 
 	for citizen in city_citizens:
 		if not citizen is Dictionary:
@@ -1180,8 +1218,6 @@ static func get_city_object_worker_ids(city_object: Dictionary) -> Array:
 	if object_id < 0:
 		return worker_ids
 
-	ensure_starting_city_population()
-
 	for citizen in city_citizens:
 		if not citizen is Dictionary:
 			continue
@@ -1202,19 +1238,7 @@ static func get_city_object_worker_ids(city_object: Dictionary) -> Array:
 static func get_city_object_worker_count(city_object: Dictionary) -> int:
 	return get_city_object_worker_ids(city_object).size()
 
-
-static func get_city_object_worker_names(city_object: Dictionary) -> Array:
-	var worker_names := []
-	var worker_ids := get_city_object_worker_ids(city_object)
-
-	for worker_id in worker_ids:
-		worker_names.append(get_city_citizen_display_name(int(worker_id)))
-
-	return worker_names
-
-
 static func get_first_unemployed_city_citizen_index() -> int:
-	ensure_starting_city_population()
 
 	for citizen_index in range(city_citizens.size()):
 		var raw_citizen = city_citizens[citizen_index]
@@ -1234,9 +1258,7 @@ static func get_first_unemployed_city_citizen_index() -> int:
 
 	return -1
 
-
 static func assign_unemployed_citizens_to_available_workplaces() -> int:
-	ensure_starting_city_population()
 
 	var assigned_count := 0
 
@@ -1251,69 +1273,74 @@ static func assign_unemployed_citizens_to_available_workplaces() -> int:
 		if not city_object_is_workplace(city_object):
 			continue
 
-		var workplace_id := int(city_object.get("id", -1))
+		var workplace_id := int(
+			city_object.get("id", -1)
+		)
 
 		if workplace_id < 0:
 			continue
 
-		var worker_capacity := get_city_object_worker_capacity(city_object)
+		var worker_capacity := get_city_object_worker_capacity(
+			city_object
+		)
 
 		if worker_capacity <= 0:
 			continue
 
-		var assigned_worker_ids: Array = []
+		while true:
+			var current_workplace := get_city_object_by_id(
+				workplace_id
+			)
 
-		for citizen in city_citizens:
-			if not citizen is Dictionary:
-				continue
-
-			if int(citizen.get("job_object_id", -1)) != workplace_id:
-				continue
-
-			var citizen_id := int(citizen.get("id", -1))
-
-			if citizen_id < 0:
-				continue
-
-			if assigned_worker_ids.has(citizen_id):
-				continue
-
-			if assigned_worker_ids.size() >= worker_capacity:
+			if current_workplace.is_empty():
 				break
 
-			assigned_worker_ids.append(citizen_id)
+			if (
+				get_city_object_worker_count(current_workplace)
+				>= worker_capacity
+			):
+				break
 
-		while assigned_worker_ids.size() < worker_capacity:
-			var unemployed_citizen_index := get_first_unemployed_city_citizen_index()
+			var unemployed_citizen_index := (
+				get_first_unemployed_city_citizen_index()
+			)
 
 			if unemployed_citizen_index < 0:
 				break
 
-			var raw_citizen = city_citizens[unemployed_citizen_index]
+			var raw_citizen = city_citizens[
+				unemployed_citizen_index
+			]
 
 			if not raw_citizen is Dictionary:
 				break
 
 			var citizen: Dictionary = raw_citizen
-			var citizen_id := int(citizen.get("id", -1))
+			var citizen_id := int(
+				citizen.get("id", -1)
+			)
 
 			if citizen_id < 0:
 				break
 
-			citizen["job_object_id"] = workplace_id
-			city_citizens[unemployed_citizen_index] = citizen
+			if not assign_city_citizen_job(
+				citizen_id,
+				workplace_id
+			):
+				push_error(
+					"Failed to assign unemployed citizen "
+					+ str(citizen_id)
+					+ " to workplace "
+					+ str(workplace_id)
+				)
 
-			if not assigned_worker_ids.has(citizen_id):
-				assigned_worker_ids.append(citizen_id)
-				assigned_count += 1
+				break
 
-		city_object["assigned_worker_ids"] = assigned_worker_ids
-		city_objects[object_index] = city_object
+			assigned_count += 1
 
 	return assigned_count
 
 static func get_first_homeless_city_citizen_index() -> int:
-	ensure_starting_city_population()
 
 	for citizen_index in range(city_citizens.size()):
 		var raw_citizen = city_citizens[citizen_index]
@@ -1334,7 +1361,6 @@ static func get_first_homeless_city_citizen_index() -> int:
 	return -1
 
 static func assign_homeless_citizens_to_available_housing() -> int:
-	ensure_starting_city_population()
 
 	var assigned_count := 0
 
@@ -1345,69 +1371,68 @@ static func assign_homeless_citizens_to_available_housing() -> int:
 			continue
 
 		var city_object: Dictionary = raw_city_object
-		var object_type := str(city_object.get("type", ""))
-
-		if object_type != CITY_OBJECT_HOUSE:
-			continue
-
 		var house_id := int(city_object.get("id", -1))
 
 		if house_id < 0:
 			continue
 
-		var resident_capacity := get_city_object_resident_capacity(city_object)
+		var resident_capacity := (
+			get_city_object_resident_capacity(city_object)
+		)
 
 		if resident_capacity <= 0:
 			continue
 
-		var resident_ids: Array = []
+		while true:
+			var current_house := get_city_object_by_id(
+				house_id
+			)
 
-		for citizen in city_citizens:
-			if not citizen is Dictionary:
-				continue
-
-			if int(citizen.get("home_object_id", -1)) != house_id:
-				continue
-
-			var citizen_id := int(citizen.get("id", -1))
-
-			if citizen_id < 0:
-				continue
-
-			if resident_ids.has(citizen_id):
-				continue
-
-			if resident_ids.size() >= resident_capacity:
+			if current_house.is_empty():
 				break
 
-			resident_ids.append(citizen_id)
+			if (
+				get_city_object_resident_count(current_house)
+				>= resident_capacity
+			):
+				break
 
-		while resident_ids.size() < resident_capacity:
-			var homeless_citizen_index := get_first_homeless_city_citizen_index()
+			var homeless_citizen_index := (
+				get_first_homeless_city_citizen_index()
+			)
 
 			if homeless_citizen_index < 0:
 				break
 
-			var raw_citizen = city_citizens[homeless_citizen_index]
+			var raw_citizen = city_citizens[
+				homeless_citizen_index
+			]
 
 			if not raw_citizen is Dictionary:
 				break
 
 			var citizen: Dictionary = raw_citizen
-			var citizen_id := int(citizen.get("id", -1))
+			var citizen_id := int(
+				citizen.get("id", -1)
+			)
 
 			if citizen_id < 0:
 				break
 
-			citizen["home_object_id"] = house_id
-			city_citizens[homeless_citizen_index] = citizen
+			if not assign_city_citizen_home(
+				citizen_id,
+				house_id
+			):
+				push_error(
+					"Failed to assign homeless citizen "
+					+ str(citizen_id)
+					+ " to housing object "
+					+ str(house_id)
+				)
 
-			if not resident_ids.has(citizen_id):
-				resident_ids.append(citizen_id)
-				assigned_count += 1
+				break
 
-		city_object["resident_ids"] = resident_ids
-		city_objects[object_index] = city_object
+			assigned_count += 1
 
 	return assigned_count
 
@@ -1425,7 +1450,17 @@ static func reset_city_object_state() -> void:
 	city_object_index_by_id.clear()
 	city_occupied_tiles.clear()
 	next_city_object_id = 1
-	city_storage_version += 1
+
+	_mark_city_objects_changed()
+
+	# Clearing city objects also removes every object container and every
+	# source of public Stockpile capacity.
+	city_container_version += 1
+	city_public_storage_version += 1
+
+	# Houses and workplaces no longer exist, so assignment observers must
+	# invalidate any relationship displays.
+	_mark_city_assignments_changed()
 
 static func can_place_city_object(
 	city_world: WorldData,
@@ -1561,21 +1596,16 @@ static func add_city_object(
 
 	occupy_city_object_tiles(city_object)
 
-	var should_refresh_city_ui := false
+	_mark_city_objects_changed()
 
 	if not starting_storage.is_empty():
-		should_refresh_city_ui = true
+		_mark_city_container_changed(city_object)
 
 	if object_type == CITY_OBJECT_HOUSE:
 		assign_homeless_citizens_to_available_housing()
-		should_refresh_city_ui = true
 
 	if city_object_is_workplace(city_object):
 		assign_unemployed_citizens_to_available_workplaces()
-		should_refresh_city_ui = true
-
-	if should_refresh_city_ui:
-		city_storage_version += 1
 
 	return city_object
 
@@ -1733,7 +1763,7 @@ static func set_city_object_stored_resource_amount(
 	city_object["stored_resources"] = stored_resources
 	city_objects[object_index] = city_object
 
-	city_storage_version += 1
+	_mark_city_container_changed(city_object)
 
 static func add_resource_to_city_object_storage(
 	object_id: int,
@@ -1831,7 +1861,6 @@ static func can_place_city_road_tile(city_world: WorldData, tile_position: Vecto
 
 	return true
 
-
 static func add_city_road_object(tile_positions: Array, object_owner: String = "player") -> Dictionary:
 	var clean_tiles: Array = []
 
@@ -1863,7 +1892,10 @@ static func add_city_road_object(tile_positions: Array, object_owner: String = "
 	for tile_position in clean_tiles:
 		city_occupied_tiles[tile_position] = int(city_object["id"])
 
+	_mark_city_objects_changed()
+
 	return city_object
+
 static func has_valid_world_map_texture_cache(source_world) -> bool:
 	if source_world == null:
 		return false
@@ -2006,3 +2038,435 @@ static func reset_city_camera_state() -> void:
 static func clear_visual_texture_caches() -> void:
 	clear_world_map_texture_cache()
 	clear_city_map_texture_cache()
+
+static func get_city_object_worker_names(city_object: Dictionary) -> Array:
+	var worker_names := []
+	var worker_ids := get_city_object_worker_ids(city_object)
+
+	for worker_id in worker_ids:
+		worker_names.append(get_city_citizen_display_name(int(worker_id)))
+
+	return worker_names
+
+static func _get_clean_city_object_assignment_ids(
+	city_object: Dictionary,
+	object_id: int,
+	object_id_list_field: String,
+	citizen_object_id_field: String
+) -> Array:
+	var clean_assignment_ids: Array = []
+
+	if city_object.is_empty():
+		return clean_assignment_ids
+
+	var raw_assignment_ids = city_object.get(
+		object_id_list_field,
+		[]
+	)
+
+	if not raw_assignment_ids is Array:
+		return clean_assignment_ids
+
+	for raw_citizen_id in raw_assignment_ids:
+		var citizen_id := int(raw_citizen_id)
+
+		if citizen_id < 0:
+			continue
+
+		if clean_assignment_ids.has(citizen_id):
+			continue
+
+		var citizen_index := get_city_citizen_index_by_id(
+			citizen_id
+		)
+
+		if citizen_index < 0:
+			continue
+
+		var raw_citizen = city_citizens[citizen_index]
+
+		if not raw_citizen is Dictionary:
+			continue
+
+		var citizen: Dictionary = raw_citizen
+
+		if not bool(citizen.get("alive", true)):
+			continue
+
+		if (
+			int(citizen.get(citizen_object_id_field, -1))
+			!= object_id
+		):
+			continue
+
+		clean_assignment_ids.append(citizen_id)
+
+	return clean_assignment_ids
+
+
+static func _write_city_object_assignment_ids(
+	object_index: int,
+	object_id_list_field: String,
+	assignment_ids: Array
+) -> bool:
+	if object_index < 0 or object_index >= city_objects.size():
+		return false
+
+	var raw_city_object = city_objects[object_index]
+
+	if not raw_city_object is Dictionary:
+		return false
+
+	var city_object: Dictionary = raw_city_object
+	var existing_assignment_ids = city_object.get(
+		object_id_list_field,
+		[]
+	)
+
+	if (
+		existing_assignment_ids is Array
+		and existing_assignment_ids == assignment_ids
+	):
+		return false
+
+	city_object[object_id_list_field] = assignment_ids.duplicate()
+	city_objects[object_index] = city_object
+
+	return true
+
+
+static func _remove_citizen_from_city_object_assignment(
+	object_id: int,
+	citizen_id: int,
+	object_id_list_field: String,
+	citizen_object_id_field: String
+) -> bool:
+	var object_index := get_city_object_index_by_id(object_id)
+
+	if object_index < 0:
+		return false
+
+	var raw_city_object = city_objects[object_index]
+
+	if not raw_city_object is Dictionary:
+		return false
+
+	var city_object: Dictionary = raw_city_object
+	var assignment_ids := _get_clean_city_object_assignment_ids(
+		city_object,
+		object_id,
+		object_id_list_field,
+		citizen_object_id_field
+	)
+
+	var removed_citizen := false
+
+	while assignment_ids.has(citizen_id):
+		assignment_ids.erase(citizen_id)
+		removed_citizen = true
+
+	var assignment_list_changed := (
+		_write_city_object_assignment_ids(
+			object_index,
+			object_id_list_field,
+			assignment_ids
+		)
+	)
+
+	return removed_citizen or assignment_list_changed
+
+static func assign_city_citizen_home(
+	citizen_id: int,
+	house_id: int
+) -> bool:
+
+	var citizen_index := get_city_citizen_index_by_id(citizen_id)
+
+	if citizen_index < 0:
+		return false
+
+	var raw_citizen = city_citizens[citizen_index]
+
+	if not raw_citizen is Dictionary:
+		return false
+
+	var citizen: Dictionary = raw_citizen
+
+	if not bool(citizen.get("alive", true)):
+		return false
+
+	var house_index := get_city_object_index_by_id(house_id)
+
+	if house_index < 0:
+		return false
+
+	var raw_house = city_objects[house_index]
+
+	if not raw_house is Dictionary:
+		return false
+
+	var house: Dictionary = raw_house
+	var resident_capacity := get_city_object_resident_capacity(
+		house
+	)
+
+	if resident_capacity <= 0:
+		return false
+
+	var resident_ids := _get_clean_city_object_assignment_ids(
+		house,
+		house_id,
+		"resident_ids",
+		"home_object_id"
+	)
+
+	var current_home_id := int(
+		citizen.get("home_object_id", -1)
+	)
+
+	if current_home_id == house_id:
+		var assignment_changed := false
+
+		if not resident_ids.has(citizen_id):
+			if resident_ids.size() >= resident_capacity:
+				push_error(
+					"Citizen "
+					+ str(citizen_id)
+					+ " points to full House "
+					+ str(house_id)
+					+ " but is missing from its resident list."
+				)
+
+				return false
+
+			resident_ids.append(citizen_id)
+			assignment_changed = true
+
+		if _write_city_object_assignment_ids(
+			house_index,
+			"resident_ids",
+			resident_ids
+		):
+			assignment_changed = true
+
+		if assignment_changed:
+			_mark_city_assignments_changed()
+
+		return true
+
+	if resident_ids.size() >= resident_capacity:
+		return false
+
+	var assignment_changed := false
+
+	if current_home_id >= 0:
+		if _remove_citizen_from_city_object_assignment(
+			current_home_id,
+			citizen_id,
+			"resident_ids",
+			"home_object_id"
+		):
+			assignment_changed = true
+
+	citizen["home_object_id"] = house_id
+	city_citizens[citizen_index] = citizen
+	assignment_changed = true
+
+	resident_ids.append(citizen_id)
+
+	if _write_city_object_assignment_ids(
+		house_index,
+		"resident_ids",
+		resident_ids
+	):
+		assignment_changed = true
+
+	if assignment_changed:
+		_mark_city_assignments_changed()
+
+	return true
+
+
+static func remove_city_citizen_home(citizen_id: int) -> bool:
+	var citizen_index := get_city_citizen_index_by_id(citizen_id)
+
+	if citizen_index < 0:
+		return false
+
+	var raw_citizen = city_citizens[citizen_index]
+
+	if not raw_citizen is Dictionary:
+		return false
+
+	var citizen: Dictionary = raw_citizen
+	var current_home_id := int(
+		citizen.get("home_object_id", -1)
+	)
+
+	if current_home_id < 0:
+		return false
+
+	_remove_citizen_from_city_object_assignment(
+		current_home_id,
+		citizen_id,
+		"resident_ids",
+		"home_object_id"
+	)
+
+	citizen["home_object_id"] = -1
+	city_citizens[citizen_index] = citizen
+
+	_mark_city_assignments_changed()
+
+	return true
+
+static func assign_city_citizen_job(
+	citizen_id: int,
+	workplace_id: int
+) -> bool:
+
+	var citizen_index := get_city_citizen_index_by_id(citizen_id)
+
+	if citizen_index < 0:
+		return false
+
+	var raw_citizen = city_citizens[citizen_index]
+
+	if not raw_citizen is Dictionary:
+		return false
+
+	var citizen: Dictionary = raw_citizen
+
+	if not bool(citizen.get("alive", true)):
+		return false
+
+	var workplace_index := get_city_object_index_by_id(
+		workplace_id
+	)
+
+	if workplace_index < 0:
+		return false
+
+	var raw_workplace = city_objects[workplace_index]
+
+	if not raw_workplace is Dictionary:
+		return false
+
+	var workplace: Dictionary = raw_workplace
+
+	if not city_object_is_workplace(workplace):
+		return false
+
+	var worker_capacity := get_city_object_worker_capacity(
+		workplace
+	)
+
+	if worker_capacity <= 0:
+		return false
+
+	var worker_ids := _get_clean_city_object_assignment_ids(
+		workplace,
+		workplace_id,
+		"assigned_worker_ids",
+		"job_object_id"
+	)
+
+	var current_job_id := int(
+		citizen.get("job_object_id", -1)
+	)
+
+	if current_job_id == workplace_id:
+		var assignment_changed := false
+
+		if not worker_ids.has(citizen_id):
+			if worker_ids.size() >= worker_capacity:
+				push_error(
+					"Citizen "
+					+ str(citizen_id)
+					+ " points to full workplace "
+					+ str(workplace_id)
+					+ " but is missing from its worker list."
+				)
+
+				return false
+
+			worker_ids.append(citizen_id)
+			assignment_changed = true
+
+		if _write_city_object_assignment_ids(
+			workplace_index,
+			"assigned_worker_ids",
+			worker_ids
+		):
+			assignment_changed = true
+
+		if assignment_changed:
+			_mark_city_assignments_changed()
+
+		return true
+
+	if worker_ids.size() >= worker_capacity:
+		return false
+
+	var assignment_changed := false
+
+	if current_job_id >= 0:
+		if _remove_citizen_from_city_object_assignment(
+			current_job_id,
+			citizen_id,
+			"assigned_worker_ids",
+			"job_object_id"
+		):
+			assignment_changed = true
+
+	citizen["job_object_id"] = workplace_id
+	city_citizens[citizen_index] = citizen
+	assignment_changed = true
+
+	worker_ids.append(citizen_id)
+
+	if _write_city_object_assignment_ids(
+		workplace_index,
+		"assigned_worker_ids",
+		worker_ids
+	):
+		assignment_changed = true
+
+	if assignment_changed:
+		_mark_city_assignments_changed()
+
+	return true
+
+
+static func remove_city_citizen_job(citizen_id: int) -> bool:
+	var citizen_index := get_city_citizen_index_by_id(citizen_id)
+
+	if citizen_index < 0:
+		return false
+
+	var raw_citizen = city_citizens[citizen_index]
+
+	if not raw_citizen is Dictionary:
+		return false
+
+	var citizen: Dictionary = raw_citizen
+	var current_job_id := int(
+		citizen.get("job_object_id", -1)
+	)
+
+	if current_job_id < 0:
+		return false
+
+	_remove_citizen_from_city_object_assignment(
+		current_job_id,
+		citizen_id,
+		"assigned_worker_ids",
+		"job_object_id"
+	)
+
+	citizen["job_object_id"] = -1
+	city_citizens[citizen_index] = citizen
+
+	_mark_city_assignments_changed()
+
+	return true

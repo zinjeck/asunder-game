@@ -1,8 +1,11 @@
 extends Node2D
 class_name CityRenderer
 
-@export_file("*.tscn") var world_scene_path: String = ""
+const CityStateValidator = preload(
+	"res://scripts/city/simulation/CityStateValidator.gd"
+)
 
+@export_file("*.tscn") var world_scene_path: String = ""
 @export var local_tiles_per_world_tile: int = 64
 @export var city_tile_size: int = 2
 
@@ -66,7 +69,13 @@ var hovered_city_tile: Vector2i = Vector2i(-1, -1)
 var previous_hovered_city_tile: Vector2i = Vector2i(-1, -1)
 var hover_tile_outline: Panel
 var selected_city_object_id: int = -1
-var observed_city_storage_version: int = -1
+
+var observed_city_object_version: int = -1
+var observed_city_container_version: int = -1
+var observed_city_public_storage_version: int = -1
+var observed_city_citizen_version: int = -1
+var observed_city_assignment_version: int = -1
+
 var active_city_object_placement: Dictionary = {}
 var object_info_panel: Panel
 var object_info_title_label: Label
@@ -127,12 +136,62 @@ func _process(_delta: float) -> void:
 	if is_road_dragging:
 		update_road_drag_selection()
 
-	if observed_city_storage_version != WorldData.city_storage_version:
-		observed_city_storage_version = WorldData.city_storage_version
+	var city_objects_changed := false
+	var city_containers_changed := false
+	var public_storage_changed := false
+	var city_citizens_changed := false
+	var city_assignments_changed := false
+
+	if observed_city_object_version != WorldData.city_object_version:
+		observed_city_object_version = WorldData.city_object_version
+		city_objects_changed = true
+
+	if observed_city_container_version != WorldData.city_container_version:
+		observed_city_container_version = WorldData.city_container_version
+		city_containers_changed = true
+
+	if (
+		observed_city_public_storage_version
+		!= WorldData.city_public_storage_version
+	):
+		observed_city_public_storage_version = (
+			WorldData.city_public_storage_version
+		)
+		public_storage_changed = true
+
+	if observed_city_citizen_version != WorldData.city_citizen_version:
+		observed_city_citizen_version = WorldData.city_citizen_version
+		city_citizens_changed = true
+
+	if (
+		observed_city_assignment_version
+		!= WorldData.city_assignment_version
+	):
+		observed_city_assignment_version = (
+			WorldData.city_assignment_version
+		)
+		city_assignments_changed = true
+
+	if public_storage_changed:
 		update_resource_bar_values()
+
+	if (
+		city_objects_changed
+		or city_containers_changed
+		or city_citizens_changed
+		or city_assignments_changed
+	):
 		update_selected_object_panel()
+
+	if city_objects_changed:
+		queue_redraw()
+
+	if (
+		city_objects_changed
+		or city_citizens_changed
+		or city_assignments_changed
+	):
 		update_debug_panel_text()
-		update_citizen_debug_list_text()
 
 func _input(event: InputEvent) -> void:
 	if event is InputEventKey and event.pressed and not event.echo:
@@ -1572,7 +1631,6 @@ func update_selected_object_panel() -> void:
 	]
 
 	if object_type == WorldData.CITY_OBJECT_CITY_CENTER:
-		WorldData.ensure_starting_city_population()
 		body_lines.append("Population: " + str(WorldData.get_city_population_count()))
 		body_lines.append(
 			"Housed: "
@@ -3249,9 +3307,26 @@ func create_debug_panel() -> void:
 		Callable(self, "get_city_debug_panel_text")
 	)
 
+	var panel_moved_callable := Callable(
+		self,
+		"on_debug_panel_moved"
+	)
+
+	if not debug_panel_ui.panel_moved.is_connected(
+		panel_moved_callable
+	):
+		debug_panel_ui.panel_moved.connect(
+			panel_moved_callable
+		)
+
 	create_citizen_debug_button()
 	create_citizen_debug_list_panel()
 	update_citizen_debug_ui()
+
+func on_debug_panel_moved(
+	_new_position: Vector2
+) -> void:
+	layout_citizen_debug_list_panel()
 
 func create_citizen_debug_button() -> void:
 	if debug_panel_ui == null:
@@ -3339,30 +3414,51 @@ func update_citizen_debug_ui() -> void:
 			layout_citizen_debug_list_panel()
 			update_citizen_debug_list_text()
 
-
 func layout_citizen_debug_list_panel() -> void:
 	if citizen_debug_panel == null:
 		return
 
 	var panel_position := Vector2(
-		debug_panel_position.x + debug_panel_min_size.x + CITIZEN_DEBUG_PANEL_MARGIN,
+		debug_panel_position.x
+		+ debug_panel_min_size.x
+		+ CITIZEN_DEBUG_PANEL_MARGIN,
 		debug_panel_position.y
 	)
 
 	if debug_panel_ui != null and debug_panel_ui.panel != null:
-		panel_position = debug_panel_ui.panel.position + Vector2(debug_panel_ui.panel.size.x + CITIZEN_DEBUG_PANEL_MARGIN, 0.0)
+		panel_position = (
+			debug_panel_ui.panel.position
+			+ Vector2(
+				debug_panel_ui.panel.size.x
+				+ CITIZEN_DEBUG_PANEL_MARGIN,
+				0.0
+			)
+		)
 
 	citizen_debug_panel.position = panel_position
 	citizen_debug_panel.size = CITIZEN_DEBUG_PANEL_SIZE
 
 	if citizen_debug_title_label != null:
-		citizen_debug_title_label.position = Vector2(12.0, 10.0)
-		citizen_debug_title_label.size = Vector2(CITIZEN_DEBUG_PANEL_SIZE.x - 24.0, 24.0)
+		citizen_debug_title_label.position = Vector2(
+			12.0,
+			10.0
+		)
+
+		citizen_debug_title_label.size = Vector2(
+			CITIZEN_DEBUG_PANEL_SIZE.x - 24.0,
+			24.0
+		)
 
 	if citizen_debug_body_label != null:
-		citizen_debug_body_label.position = Vector2(12.0, 42.0)
-		citizen_debug_body_label.size = Vector2(CITIZEN_DEBUG_PANEL_SIZE.x - 24.0, CITIZEN_DEBUG_PANEL_SIZE.y - 54.0)
+		citizen_debug_body_label.position = Vector2(
+			12.0,
+			42.0
+		)
 
+		citizen_debug_body_label.size = Vector2(
+			CITIZEN_DEBUG_PANEL_SIZE.x - 24.0,
+			CITIZEN_DEBUG_PANEL_SIZE.y - 54.0
+		)
 
 func update_citizen_debug_list_text() -> void:
 	if citizen_debug_body_label == null:
@@ -3381,6 +3477,8 @@ func get_simulation_debug_text() -> String:
 		SimulationClock.get_debug_text()
 		+ "\n"
 		+ SimulationCoordinator.get_debug_text()
+		+ "\n"
+		+ CityStateValidator.get_summary_text()
 	)
 
 func get_citizen_debug_list_text() -> String:
@@ -3472,6 +3570,8 @@ func toggle_debug_mode() -> void:
 	queue_redraw()
 
 	if is_enabled:
+		CityStateValidator.validate(true, true)
+		debug_panel_ui.refresh()
 		print("Debug mode: ON")
 	else:
 		print("Debug mode: OFF")
