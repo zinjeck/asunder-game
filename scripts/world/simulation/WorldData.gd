@@ -82,6 +82,7 @@ static var city_container_version: int = 0
 static var city_public_storage_version: int = 0
 static var city_citizen_version: int = 0
 static var city_assignment_version: int = 0
+static var city_workplace_version: int = 0
 static var city_citizen_first_name_pool: Array = [
 	"Arlen",
 	"Tovan",
@@ -185,6 +186,52 @@ const CITY_OBJECT_SHAPE_RECTANGLE := "rectangle"
 const CITY_OBJECT_SHAPE_TILE_AREA := "tile_area"
 const WORKPLACE_KIND_NONE := "none"
 const WORKPLACE_KIND_GATHERING := "gathering"
+
+const WORKPLACE_ANCHOR_MODE_FOOTPRINT_CENTER := "footprint_center"
+const WORKPLACE_ANCHOR_MODE_EXPLICIT_POINT := "explicit_point"
+const WORKPLACE_ANCHOR_MODE_EXPLICIT_TILE := "explicit_tile"
+
+const WORKPLACE_RESOURCE_SOURCE_MODE_NONE := "none"
+const WORKPLACE_RESOURCE_SOURCE_MODE_RADIUS := "radius"
+const WORKPLACE_RESOURCE_SOURCE_MODE_LINKED_TILES := "linked_tiles"
+const WORKPLACE_RESOURCE_SOURCE_MODE_LINKED_OBJECTS := "linked_objects"
+const WORKPLACE_RESOURCE_SOURCE_MODE_STORED_INPUTS := "stored_inputs"
+const WORKPLACE_RESOURCE_SOURCE_MODE_EXPLICIT_WORK_POINTS := "explicit_work_points"
+
+const WORKPLACE_WORK_LOCATION_MODE_NONE := "none"
+const WORKPLACE_WORK_LOCATION_MODE_RESOURCE_SOURCE_TILES := "resource_source_tiles"
+const WORKPLACE_WORK_LOCATION_MODE_LINKED_TILES := "linked_tiles"
+const WORKPLACE_WORK_LOCATION_MODE_WORKSTATIONS := "workstations"
+const WORKPLACE_WORK_LOCATION_MODE_EXPLICIT_POINTS := "explicit_points"
+const WORKPLACE_WORK_LOCATION_MODE_FOOTPRINT := "footprint"
+const WORKPLACE_MOVEMENT_MODE_NONE := "none"
+const WORKPLACE_MOVEMENT_MODE_MOVE_BETWEEN_WORK_POINTS := "move_between_work_points"
+const WORKPLACE_MOVEMENT_MODE_STATION_BASED := "station_based"
+const WORKPLACE_MOVEMENT_MODE_REMAIN_AT_STATION := "remain_at_station"
+const WORKPLACE_MOVEMENT_MODE_LINKED_TILE_TASKS := "linked_tile_tasks"
+const WORKPLACE_BREAK_LOCATION_MODE_NONE := "none"
+const WORKPLACE_BREAK_LOCATION_MODE_FOOTPRINT := "footprint"
+const WORKPLACE_BREAK_LOCATION_MODE_FOOTPRINT_RADIUS := "footprint_radius"
+const WORKPLACE_BREAK_LOCATION_MODE_LINKED_AREA := "linked_area"
+const WORKPLACE_BREAK_LOCATION_MODE_EXPLICIT_TILES := "explicit_tiles"
+const WORKPLACE_BREAK_LOCATION_MODE_WORK_AREA := "work_area"
+const WORKPLACE_BREAK_LOCATION_MODE_INTERIOR := "interior"
+const WORKPLACE_OVERFLOW_MODE_NONE := "none"
+const WORKPLACE_OVERFLOW_MODE_FOOTPRINT_RADIUS := "footprint_radius"
+const WORKPLACE_OVERFLOW_MODE_EXPLICIT_TILES := "explicit_tiles"
+const WORKPLACE_OVERFLOW_MODE_LINKED_AREA := "linked_area"
+
+const PRODUCTIVITY_BASIS_POINTS_SCALE := 10_000
+const DEFAULT_WORKPLACE_SITE_PRODUCTIVITY_BASIS_POINTS := (
+	PRODUCTIVITY_BASIS_POINTS_SCALE
+)
+
+const WORKPLACE_PRODUCTION_STATUS_INACTIVE := "inactive"
+const WORKPLACE_PRODUCTION_STATUS_IDLE_NO_WORKERS := "idle_no_workers"
+const WORKPLACE_PRODUCTION_STATUS_WORKING := "working"
+const WORKPLACE_PRODUCTION_STATUS_BLOCKED_OUTPUT_FULL := "blocked_output_full"
+const WORKPLACE_PRODUCTION_STATUS_BLOCKED_MISSING_INPUT := "blocked_missing_input"
+
 const CONTAINER_TYPE_NONE := "none"
 const CONTAINER_TYPE_PUBLIC_CITY_STORAGE := "public_city_storage"
 const CONTAINER_TYPE_PRIVATE_HOME_STORAGE := "private_home_storage"
@@ -271,6 +318,33 @@ static func setup_city_object_definitions() -> void:
 		"workplace_kind": WORKPLACE_KIND_GATHERING,
 		"worker_capacity": 4,
 		"output_resource": RESOURCE_FISH,
+		"production_recipe": {
+			"inputs": {},
+			"outputs": {
+				RESOURCE_FISH: 1
+			},
+			"work_units_per_batch": 60_000
+		},
+		"resource_source_policy": {
+			"mode": WORKPLACE_RESOURCE_SOURCE_MODE_RADIUS,
+			"resource_type": RESOURCE_FISH,
+			"radius_tiles": 8,
+			"anchor_mode": WORKPLACE_ANCHOR_MODE_FOOTPRINT_CENTER
+		},
+		"work_location_policy": {
+			"mode": WORKPLACE_WORK_LOCATION_MODE_RESOURCE_SOURCE_TILES
+		},
+		"work_movement_policy": {
+			"mode": WORKPLACE_MOVEMENT_MODE_MOVE_BETWEEN_WORK_POINTS
+		},
+		"break_location_policy": {
+			"mode": WORKPLACE_BREAK_LOCATION_MODE_FOOTPRINT_RADIUS,
+			"radius_tiles": 3
+		},
+		"overflow_policy": {
+			"mode": WORKPLACE_OVERFLOW_MODE_FOOTPRINT_RADIUS,
+			"radius_tiles": 2
+		},
 		"storage_resources": [
 			RESOURCE_FISH
 		],
@@ -318,8 +392,43 @@ static func make_city_object_definition(values: Dictionary) -> Dictionary:
 		"is_workplace": is_workplace,
 		"workplace_kind": str(values.get("workplace_kind", WORKPLACE_KIND_NONE)),
 		"worker_capacity": int(values.get("worker_capacity", 0)),
-		"output_resource": str(values.get("output_resource", RESOURCE_NONE))
+		"output_resource": str(values.get("output_resource", RESOURCE_NONE)),
+		"production_recipe": _copy_dictionary_field(
+			values,
+			"production_recipe"
+		),
+		"resource_source_policy": _copy_dictionary_field(
+			values,
+			"resource_source_policy"
+		),
+		"work_location_policy": _copy_dictionary_field(
+			values,
+			"work_location_policy"
+		),
+		"work_movement_policy": _copy_dictionary_field(
+			values,
+			"work_movement_policy"
+		),
+		"break_location_policy": _copy_dictionary_field(
+			values,
+			"break_location_policy"
+		),
+		"overflow_policy": _copy_dictionary_field(
+			values,
+			"overflow_policy"
+		)
 	}
+
+static func _copy_dictionary_field(
+	values: Dictionary,
+	field_name: String
+) -> Dictionary:
+	var raw_value = values.get(field_name, {})
+
+	if not raw_value is Dictionary:
+		return {}
+
+	return raw_value.duplicate(true)
 
 static func get_city_object_definition(object_type: String) -> Dictionary:
 	ensure_city_object_definitions_ready()
@@ -329,6 +438,242 @@ static func get_city_object_definition(object_type: String) -> Dictionary:
 
 	return {}
 
+# Workplace policies are shared, immutable definition data.
+# Callers must treat the returned dictionaries as read-only.
+static func _get_city_object_definition_dictionary(
+	city_object: Dictionary,
+	definition_field: String
+) -> Dictionary:
+	if city_object.is_empty():
+		return {}
+
+	var definition := get_city_object_definition_from_object(city_object)
+
+	if definition.is_empty():
+		return {}
+
+	var raw_value = definition.get(definition_field, {})
+
+	if not raw_value is Dictionary:
+		return {}
+
+	var definition_dictionary: Dictionary = raw_value
+	return definition_dictionary
+
+
+static func get_city_object_production_recipe(
+	city_object: Dictionary
+) -> Dictionary:
+	return _get_city_object_definition_dictionary(
+		city_object,
+		"production_recipe"
+	)
+
+
+static func get_city_object_resource_source_policy(
+	city_object: Dictionary
+) -> Dictionary:
+	return _get_city_object_definition_dictionary(
+		city_object,
+		"resource_source_policy"
+	)
+
+
+static func get_city_object_work_location_policy(
+	city_object: Dictionary
+) -> Dictionary:
+	return _get_city_object_definition_dictionary(
+		city_object,
+		"work_location_policy"
+	)
+
+
+static func get_city_object_work_movement_policy(
+	city_object: Dictionary
+) -> Dictionary:
+	return _get_city_object_definition_dictionary(
+		city_object,
+		"work_movement_policy"
+	)
+
+
+static func get_city_object_break_location_policy(
+	city_object: Dictionary
+) -> Dictionary:
+	return _get_city_object_definition_dictionary(
+		city_object,
+		"break_location_policy"
+	)
+
+
+static func get_city_object_overflow_policy(
+	city_object: Dictionary
+) -> Dictionary:
+	return _get_city_object_definition_dictionary(
+		city_object,
+		"overflow_policy"
+	)
+
+
+
+static func get_city_object_production_progress_work_units(
+	city_object: Dictionary
+) -> int:
+	if city_object.is_empty():
+		return 0
+
+	return maxi(
+		int(
+			city_object.get(
+				"production_progress_work_units",
+				0
+			)
+		),
+		0
+	)
+
+
+static func get_city_object_production_status(
+	city_object: Dictionary
+) -> String:
+	if city_object.is_empty():
+		return WORKPLACE_PRODUCTION_STATUS_INACTIVE
+
+	return str(
+		city_object.get(
+			"production_status",
+			WORKPLACE_PRODUCTION_STATUS_INACTIVE
+		)
+	)
+
+
+static func get_city_object_productive_worker_count(
+	city_object: Dictionary
+) -> int:
+	if city_object.is_empty():
+		return 0
+
+	return maxi(
+		int(
+			city_object.get(
+				"productive_worker_count",
+				0
+			)
+		),
+		0
+	)
+
+
+static func get_city_object_site_productivity_basis_points(
+	city_object: Dictionary
+) -> int:
+	if city_object.is_empty():
+		return DEFAULT_WORKPLACE_SITE_PRODUCTIVITY_BASIS_POINTS
+
+	return maxi(
+		int(
+			city_object.get(
+				"site_productivity_basis_points",
+				DEFAULT_WORKPLACE_SITE_PRODUCTIVITY_BASIS_POINTS
+			)
+		),
+		0
+	)
+
+
+static func is_valid_city_workplace_production_status(
+	production_status: String
+) -> bool:
+	return (
+		production_status == WORKPLACE_PRODUCTION_STATUS_INACTIVE
+		or production_status == WORKPLACE_PRODUCTION_STATUS_IDLE_NO_WORKERS
+		or production_status == WORKPLACE_PRODUCTION_STATUS_WORKING
+		or production_status == WORKPLACE_PRODUCTION_STATUS_BLOCKED_OUTPUT_FULL
+		or production_status == WORKPLACE_PRODUCTION_STATUS_BLOCKED_MISSING_INPUT
+	)
+
+
+static func set_city_workplace_production_state(
+	object_id: int,
+	progress_work_units: int,
+	production_status: String,
+	productive_worker_count: int,
+	site_productivity_basis_points: int
+) -> bool:
+	var object_index := get_city_object_index_by_id(object_id)
+
+	if object_index < 0:
+		return false
+
+	var raw_city_object = city_objects[object_index]
+
+	if not raw_city_object is Dictionary:
+		return false
+
+	var city_object: Dictionary = raw_city_object
+
+	if not city_object_is_workplace(city_object):
+		return false
+
+	var recipe := get_city_object_production_recipe(city_object)
+
+	if recipe.is_empty():
+		return false
+
+	var safe_progress := maxi(progress_work_units, 0)
+	var work_units_per_batch := int(
+		recipe.get("work_units_per_batch", 0)
+	)
+
+	if work_units_per_batch > 0:
+		safe_progress = mini(
+			safe_progress,
+			work_units_per_batch - 1
+	)
+	else:
+		safe_progress = 0
+
+	var safe_status := production_status
+
+	if not is_valid_city_workplace_production_status(safe_status):
+		safe_status = WORKPLACE_PRODUCTION_STATUS_INACTIVE
+
+	var safe_productive_worker_count := maxi(
+		productive_worker_count,
+		0
+	)
+	var safe_site_productivity := maxi(
+		site_productivity_basis_points,
+		0
+	)
+
+	var state_changed := (
+		get_city_object_production_progress_work_units(city_object)
+		!= safe_progress
+		or get_city_object_production_status(city_object)
+		!= safe_status
+		or get_city_object_productive_worker_count(city_object)
+		!= safe_productive_worker_count
+		or get_city_object_site_productivity_basis_points(city_object)
+		!= safe_site_productivity
+	)
+
+	if not state_changed:
+		return false
+
+	city_object["production_progress_work_units"] = safe_progress
+	city_object["production_status"] = safe_status
+	city_object["productive_worker_count"] = (
+		safe_productive_worker_count
+	)
+	city_object["site_productivity_basis_points"] = (
+		safe_site_productivity
+	)
+
+	city_objects[object_index] = city_object
+	_mark_city_workplaces_changed()
+
+	return true
 
 static func get_city_object_display_name_for_type(object_type: String) -> String:
 	var definition := get_city_object_definition(object_type)
@@ -610,16 +955,59 @@ static func get_total_public_city_resource_storage_capacity(resource: String) ->
 	return total_capacity
 
 
-static func get_total_stored_city_resource_amount(resource: String) -> int:
-	return get_total_public_city_resource_amount(resource)
+static func get_total_stored_city_resource_amount(
+	resource: String
+) -> int:
+	var total_amount := 0
+
+	for city_object in city_objects:
+		if not city_object is Dictionary:
+			continue
+
+		if not city_object_counts_toward_city_storage_totals(
+			city_object
+		):
+			continue
+
+		total_amount += get_city_object_stored_resource_amount(
+			city_object,
+			resource
+		)
+
+	return total_amount
 
 
-static func get_total_city_resource_storage_capacity(resource: String) -> int:
-	return get_total_public_city_resource_storage_capacity(resource)
+static func get_total_city_resource_storage_capacity(
+	resource: String
+) -> int:
+	var total_capacity := 0
+
+	for city_object in city_objects:
+		if not city_object is Dictionary:
+			continue
+
+		if not city_object_counts_toward_city_storage_totals(
+			city_object
+		):
+			continue
+
+		if not can_city_object_store_resource(
+			city_object,
+			resource
+		):
+			continue
+
+		total_capacity += (
+			get_city_object_storage_capacity_for_resource(
+				city_object,
+				resource
+			)
+		)
+
+	return total_capacity
 
 static func _mark_city_objects_changed() -> void:
 	city_object_version += 1
-
 
 static func _mark_city_container_changed(
 	city_object: Dictionary
@@ -636,6 +1024,9 @@ static func _mark_city_citizens_changed() -> void:
 
 static func _mark_city_assignments_changed() -> void:
 	city_assignment_version += 1
+
+static func _mark_city_workplaces_changed() -> void:
+	city_workplace_version += 1
 
 static func rebuild_city_object_index() -> void:
 	city_object_index_by_id.clear()
@@ -1452,8 +1843,9 @@ static func reset_city_object_state() -> void:
 	next_city_object_id = 1
 
 	_mark_city_objects_changed()
+	_mark_city_workplaces_changed()
 
-	# Clearing city objects also removes every object container and every
+	# Clearing city objects also removes every object container and every# Clearing city objects also removes every object container and every
 	# source of public Stockpile capacity.
 	city_container_version += 1
 	city_public_storage_version += 1
@@ -1577,10 +1969,38 @@ static func add_city_object(
 
 	if bool(definition.get("is_workplace", false)):
 		city_object["is_workplace"] = true
-		city_object["workplace_kind"] = str(definition.get("workplace_kind", WORKPLACE_KIND_NONE))
-		city_object["worker_capacity"] = int(definition.get("worker_capacity", 0))
+		city_object["workplace_kind"] = str(
+			definition.get(
+				"workplace_kind",
+				WORKPLACE_KIND_NONE
+			)
+		)
+		city_object["worker_capacity"] = int(
+			definition.get("worker_capacity", 0)
+		)
 		city_object["assigned_worker_ids"] = []
-		city_object["output_resource"] = str(definition.get("output_resource", RESOURCE_NONE))
+		city_object["output_resource"] = str(
+			definition.get(
+				"output_resource",
+				RESOURCE_NONE
+			)
+		)
+
+		var production_recipe = definition.get(
+			"production_recipe",
+			{}
+		)
+
+		if production_recipe is Dictionary:
+			if not production_recipe.is_empty():
+				city_object["production_progress_work_units"] = 0
+				city_object["production_status"] = (
+					WORKPLACE_PRODUCTION_STATUS_IDLE_NO_WORKERS
+				)
+				city_object["productive_worker_count"] = 0
+				city_object["site_productivity_basis_points"] = (
+					DEFAULT_WORKPLACE_SITE_PRODUCTIVITY_BASIS_POINTS
+				)
 
 	var starting_storage := make_empty_city_object_storage_for_type(object_type)
 
@@ -1597,6 +2017,9 @@ static func add_city_object(
 	occupy_city_object_tiles(city_object)
 
 	_mark_city_objects_changed()
+
+	if city_object_is_workplace(city_object):
+		_mark_city_workplaces_changed()
 
 	if not starting_storage.is_empty():
 		_mark_city_container_changed(city_object)
@@ -1656,6 +2079,22 @@ static func city_object_counts_as_public_city_storage(city_object: Dictionary) -
 
 	return bool(definition.get("counts_as_public_city_storage", false))
 
+
+
+static func city_object_counts_toward_city_storage_totals(
+	city_object: Dictionary
+) -> bool:
+	if city_object.is_empty():
+		return false
+
+	var container_type := get_city_object_container_type(
+		city_object
+	)
+
+	return (
+		container_type != CONTAINER_TYPE_NONE
+		and container_type != CONTAINER_TYPE_GROUND_PILE
+	)
 
 static func get_city_object_storage_resources(city_object: Dictionary) -> Array[String]:
 	var definition := get_city_object_definition_from_object(city_object)
@@ -1975,14 +2414,14 @@ static func clear_city_map_texture_cache() -> void:
 	city_map_texture_cache_size = Vector2i.ZERO
 
 static func run_simulation_tick(
-	_tick_index: int,
-	_minutes_advanced: int
+	tick_index: int,
+	minutes_advanced: int
 ) -> void:
-	# The global simulation coordinator reaches WorldData here.
-	#
-	# This remains intentionally empty until the clock has been tested
-	# across world and city scene transitions.
-	pass
+	# Simulation systems run here in deterministic order.
+	WorkplaceProductionSystem.run_tick(
+		tick_index,
+		minutes_advanced
+	)
 
 static func reset_runtime_session_state(clear_debug: bool = false) -> void:
 	reset_world_session_state()
