@@ -1,6 +1,10 @@
 extends RefCounted
 class_name WorldData
 
+const WORKPLACE_PRODUCTION_SYSTEM := preload(
+	"res://scripts/city/simulation/systems/WorkplaceProductionSystem.gd"
+)
+
 const TERRAIN_WATER := "water"
 const TERRAIN_LAND := "land"
 const TERRAIN_MOUNTAIN := "mountain"
@@ -82,6 +86,7 @@ static var city_container_version: int = 0
 static var city_public_storage_version: int = 0
 static var city_citizen_version: int = 0
 static var city_assignment_version: int = 0
+static var city_workplace_version: int = 0
 static var city_citizen_first_name_pool: Array = [
 	"Arlen",
 	"Tovan",
@@ -196,6 +201,27 @@ const WORKPLACE_BREAK_LOCATION_MODE_NONE := "none"
 const WORKPLACE_BREAK_LOCATION_MODE_FOOTPRINT_RADIUS := "footprint_radius"
 const WORKPLACE_OVERFLOW_MODE_NONE := "none"
 const WORKPLACE_OVERFLOW_MODE_FOOTPRINT_RADIUS := "footprint_radius"
+const WORKPLACE_PRODUCTION_STATUS_INACTIVE := (
+	WORKPLACE_PRODUCTION_SYSTEM.STATUS_INACTIVE
+)
+const WORKPLACE_PRODUCTION_STATUS_IDLE_NO_WORKERS := (
+	WORKPLACE_PRODUCTION_SYSTEM.STATUS_IDLE_NO_WORKERS
+)
+const WORKPLACE_PRODUCTION_STATUS_WORKING := (
+	WORKPLACE_PRODUCTION_SYSTEM.STATUS_WORKING
+)
+const WORKPLACE_PRODUCTION_STATUS_BLOCKED_OUTPUT_FULL := (
+	WORKPLACE_PRODUCTION_SYSTEM.STATUS_BLOCKED_OUTPUT_FULL
+)
+const WORKPLACE_PRODUCTION_STATUS_BLOCKED_MISSING_INPUT := (
+	WORKPLACE_PRODUCTION_SYSTEM.STATUS_BLOCKED_MISSING_INPUT
+)
+const WORKPLACE_PRODUCTIVITY_BASIS_POINTS_SCALE := (
+	WORKPLACE_PRODUCTION_SYSTEM.PRODUCTIVITY_BASIS_POINTS_SCALE
+)
+const DEFAULT_WORKPLACE_SITE_PRODUCTIVITY_BASIS_POINTS := (
+	WORKPLACE_PRODUCTIVITY_BASIS_POINTS_SCALE
+)
 const CONTAINER_TYPE_NONE := "none"
 const CONTAINER_TYPE_PUBLIC_CITY_STORAGE := "public_city_storage"
 const CONTAINER_TYPE_PRIVATE_HOME_STORAGE := "private_home_storage"
@@ -692,6 +718,11 @@ static func _mark_city_citizens_changed() -> void:
 
 static func _mark_city_assignments_changed() -> void:
 	city_assignment_version += 1
+
+
+static func _mark_city_workplaces_changed() -> void:
+	city_workplace_version += 1
+
 
 static func rebuild_city_object_index() -> void:
 	city_object_index_by_id.clear()
@@ -1323,6 +1354,202 @@ static func get_city_object_overflow_policy(
 	)
 
 
+static func city_object_has_production_recipe(
+	city_object: Dictionary
+) -> bool:
+	if city_object.is_empty():
+		return false
+
+	var definition := get_city_object_definition_from_object(city_object)
+	var raw_recipe = definition.get("production_recipe", {})
+
+	if not raw_recipe is Dictionary:
+		return false
+
+	var recipe: Dictionary = raw_recipe
+	return not recipe.is_empty()
+
+
+static func get_city_object_production_progress_work_units(
+	city_object: Dictionary
+) -> int:
+	if city_object.is_empty():
+		return 0
+
+	return maxi(
+		int(city_object.get("production_progress_work_units", 0)),
+		0
+	)
+
+
+static func get_city_object_production_status(
+	city_object: Dictionary
+) -> String:
+	if not city_object_has_production_recipe(city_object):
+		return WORKPLACE_PRODUCTION_STATUS_INACTIVE
+
+	return str(city_object.get(
+		"production_status",
+		WORKPLACE_PRODUCTION_STATUS_IDLE_NO_WORKERS
+	))
+
+
+static func get_city_object_productive_worker_count(
+	city_object: Dictionary
+) -> int:
+	if city_object.is_empty():
+		return 0
+
+	return maxi(
+		int(city_object.get("productive_worker_count", 0)),
+		0
+	)
+
+
+static func get_city_object_site_productivity_basis_points(
+	city_object: Dictionary
+) -> int:
+	if city_object.is_empty():
+		return DEFAULT_WORKPLACE_SITE_PRODUCTIVITY_BASIS_POINTS
+
+	return maxi(
+		int(city_object.get(
+			"site_productivity_basis_points",
+			DEFAULT_WORKPLACE_SITE_PRODUCTIVITY_BASIS_POINTS
+		)),
+		0
+	)
+
+
+static func is_valid_workplace_production_status(
+	production_status: String
+) -> bool:
+	match production_status:
+		WORKPLACE_PRODUCTION_STATUS_INACTIVE:
+			return true
+		WORKPLACE_PRODUCTION_STATUS_IDLE_NO_WORKERS:
+			return true
+		WORKPLACE_PRODUCTION_STATUS_WORKING:
+			return true
+		WORKPLACE_PRODUCTION_STATUS_BLOCKED_OUTPUT_FULL:
+			return true
+		WORKPLACE_PRODUCTION_STATUS_BLOCKED_MISSING_INPUT:
+			return true
+
+	return false
+
+
+static func set_city_object_workplace_runtime_state(
+	object_id: int,
+	progress_work_units: int,
+	production_status: String,
+	productive_worker_count: int
+) -> bool:
+	var object_index := get_city_object_index_by_id(object_id)
+
+	if object_index < 0:
+		return false
+
+	var raw_city_object = city_objects[object_index]
+
+	if not raw_city_object is Dictionary:
+		return false
+
+	var city_object: Dictionary = raw_city_object
+
+	if (
+		not city_object_is_workplace(city_object)
+		or not city_object_has_production_recipe(city_object)
+	):
+		return false
+
+	var safe_progress := maxi(progress_work_units, 0)
+	var safe_productive_worker_count := maxi(
+		productive_worker_count,
+		0
+	)
+	var safe_status := production_status
+
+	if not is_valid_workplace_production_status(safe_status):
+		safe_status = WORKPLACE_PRODUCTION_STATUS_INACTIVE
+
+	var state_changed := false
+
+	if (
+		not city_object.has("production_progress_work_units")
+		or get_city_object_production_progress_work_units(city_object)
+		!= safe_progress
+	):
+		city_object["production_progress_work_units"] = safe_progress
+		state_changed = true
+
+	if (
+		not city_object.has("production_status")
+		or get_city_object_production_status(city_object) != safe_status
+	):
+		city_object["production_status"] = safe_status
+		state_changed = true
+
+	if (
+		not city_object.has("productive_worker_count")
+		or get_city_object_productive_worker_count(city_object)
+		!= safe_productive_worker_count
+	):
+		city_object["productive_worker_count"] = (
+			safe_productive_worker_count
+		)
+		state_changed = true
+
+	if not state_changed:
+		return false
+
+	city_objects[object_index] = city_object
+	_mark_city_workplaces_changed()
+
+	return true
+
+
+static func set_city_object_site_productivity_basis_points(
+	object_id: int,
+	site_productivity_basis_points: int
+) -> bool:
+	var object_index := get_city_object_index_by_id(object_id)
+
+	if object_index < 0:
+		return false
+
+	var raw_city_object = city_objects[object_index]
+
+	if not raw_city_object is Dictionary:
+		return false
+
+	var city_object: Dictionary = raw_city_object
+
+	if (
+		not city_object_is_workplace(city_object)
+		or not city_object_has_production_recipe(city_object)
+	):
+		return false
+
+	var safe_productivity := maxi(
+		site_productivity_basis_points,
+		0
+	)
+
+	if (
+		city_object.has("site_productivity_basis_points")
+		and get_city_object_site_productivity_basis_points(city_object)
+		== safe_productivity
+	):
+		return false
+
+	city_object["site_productivity_basis_points"] = safe_productivity
+	city_objects[object_index] = city_object
+	_mark_city_workplaces_changed()
+
+	return true
+
+
 static func get_city_object_worker_ids(city_object: Dictionary) -> Array:
 	var worker_ids := []
 
@@ -1586,6 +1813,7 @@ static func reset_city_object_state() -> void:
 	# Houses and workplaces no longer exist, so assignment observers must
 	# invalidate any relationship displays.
 	_mark_city_assignments_changed()
+	_mark_city_workplaces_changed()
 
 static func can_place_city_object(
 	city_world: WorldData,
@@ -1690,6 +1918,7 @@ static func add_city_object(
 	var definition := get_city_object_definition(object_type)
 	var shape_mode := str(definition.get("shape_mode", CITY_OBJECT_SHAPE_RECTANGLE))
 	var footprint_tiles := make_rectangle_city_object_footprint_tiles(top_left, size_tiles)
+	var production_recipe := get_city_object_production_recipe(city_object)
 
 	city_object["shape_mode"] = shape_mode
 	city_object["footprint_tiles"] = footprint_tiles
@@ -1707,6 +1936,16 @@ static func add_city_object(
 		city_object["assigned_worker_ids"] = []
 		city_object["output_resource"] = str(definition.get("output_resource", RESOURCE_NONE))
 
+		if not production_recipe.is_empty():
+			city_object["production_progress_work_units"] = 0
+			city_object["production_status"] = (
+				WORKPLACE_PRODUCTION_STATUS_IDLE_NO_WORKERS
+			)
+			city_object["productive_worker_count"] = 0
+			city_object["site_productivity_basis_points"] = (
+				DEFAULT_WORKPLACE_SITE_PRODUCTIVITY_BASIS_POINTS
+			)
+
 	var starting_storage := make_empty_city_object_storage_for_type(object_type)
 
 	if not starting_storage.is_empty():
@@ -1722,6 +1961,9 @@ static func add_city_object(
 	occupy_city_object_tiles(city_object)
 
 	_mark_city_objects_changed()
+
+	if not production_recipe.is_empty():
+		_mark_city_workplaces_changed()
 
 	if not starting_storage.is_empty():
 		_mark_city_container_changed(city_object)
@@ -1841,6 +2083,114 @@ static func get_city_object_resource_free_space(city_object: Dictionary, resourc
 
 	var amount := get_city_object_stored_resource_amount(city_object, resource)
 	return max(0, capacity - amount)
+
+
+static func get_city_object_production_output_capacity_batches(
+	city_object: Dictionary,
+	outputs: Dictionary
+) -> int:
+	if city_object.is_empty() or outputs.is_empty():
+		return 0
+
+	var capacity_batches := -1
+
+	for raw_resource in outputs.keys():
+		var raw_output_amount = outputs[raw_resource]
+
+		if not raw_output_amount is int:
+			return 0
+
+		var resource := str(raw_resource)
+		var output_amount: int = raw_output_amount
+
+		if (
+			output_amount <= 0
+			or not can_city_object_store_resource(
+				city_object,
+				resource
+			)
+		):
+			return 0
+
+		var free_space := get_city_object_resource_free_space(
+			city_object,
+			resource
+		)
+		var resource_capacity_batches := int(
+			free_space / output_amount
+		)
+
+		if capacity_batches < 0:
+			capacity_batches = resource_capacity_batches
+		else:
+			capacity_batches = mini(
+				capacity_batches,
+				resource_capacity_batches
+			)
+
+	return maxi(capacity_batches, 0)
+
+
+static func add_city_object_production_output_batches(
+	object_id: int,
+	outputs: Dictionary,
+	requested_batches: int
+) -> int:
+	if requested_batches <= 0 or outputs.is_empty():
+		return 0
+
+	var object_index := get_city_object_index_by_id(object_id)
+
+	if object_index < 0:
+		return 0
+
+	var raw_city_object = city_objects[object_index]
+
+	if not raw_city_object is Dictionary:
+		return 0
+
+	var city_object: Dictionary = raw_city_object
+	var capacity_batches := (
+		get_city_object_production_output_capacity_batches(
+			city_object,
+			outputs
+		)
+	)
+	var accepted_batches := mini(
+		requested_batches,
+		capacity_batches
+	)
+
+	if accepted_batches <= 0:
+		return 0
+
+	var stored_resources: Dictionary = {}
+	var raw_stored_resources = city_object.get("stored_resources", {})
+
+	if raw_stored_resources is Dictionary:
+		var existing_stored_resources: Dictionary = raw_stored_resources
+		stored_resources = existing_stored_resources.duplicate(true)
+
+	if stored_resources.is_empty():
+		stored_resources = make_empty_city_object_storage_for_type(
+			str(city_object.get("type", ""))
+		)
+
+	for raw_resource in outputs.keys():
+		var resource := str(raw_resource)
+		var output_amount := int(outputs[raw_resource])
+		var current_amount := int(stored_resources.get(resource, 0))
+
+		stored_resources[resource] = (
+			current_amount
+			+ output_amount * accepted_batches
+		)
+
+	city_object["stored_resources"] = stored_resources
+	city_objects[object_index] = city_object
+	_mark_city_container_changed(city_object)
+
+	return accepted_batches
 
 
 static func set_city_object_stored_resource_amount(
@@ -2099,15 +2449,117 @@ static func clear_city_map_texture_cache() -> void:
 	city_map_texture_cache_seed = -1
 	city_map_texture_cache_size = Vector2i.ZERO
 
-static func run_simulation_tick(
-	_tick_index: int,
-	_minutes_advanced: int
+
+static func _apply_workplace_production_result(
+	production_result: Dictionary
 ) -> void:
-	# The global simulation coordinator reaches WorldData here.
-	#
-	# This remains intentionally empty until the clock has been tested
-	# across world and city scene transitions.
-	pass
+	var object_id := int(production_result.get("object_id", -1))
+
+	if object_id < 0:
+		return
+
+	var progress_work_units := maxi(
+		int(production_result.get("progress_work_units", 0)),
+		0
+	)
+	var production_status := str(production_result.get(
+		"production_status",
+		WORKPLACE_PRODUCTION_STATUS_INACTIVE
+	))
+	var productive_worker_count := maxi(
+		int(production_result.get(
+			"productive_worker_count",
+			0
+		)),
+		0
+	)
+	var completed_batches := maxi(
+		int(production_result.get("completed_batches", 0)),
+		0
+	)
+
+	if completed_batches > 0:
+		var produced_batches := 0
+		var raw_outputs = production_result.get("outputs", {})
+
+		if raw_outputs is Dictionary:
+			var outputs: Dictionary = raw_outputs
+			produced_batches = (
+				add_city_object_production_output_batches(
+					object_id,
+					outputs,
+					completed_batches
+				)
+			)
+
+		if produced_batches < completed_batches:
+			var work_units_per_batch := maxi(
+				int(production_result.get(
+					"work_units_per_batch",
+					0
+				)),
+				0
+			)
+			var total_progress_work_units := maxi(
+				int(production_result.get(
+					"total_progress_work_units",
+					progress_work_units
+				)),
+				0
+			)
+
+			if work_units_per_batch > 0:
+				var unconverted_work_units := maxi(
+					total_progress_work_units
+					- produced_batches * work_units_per_batch,
+					0
+				)
+
+				progress_work_units = mini(
+					unconverted_work_units,
+					work_units_per_batch - 1
+				)
+			else:
+				progress_work_units = 0
+
+			production_status = (
+				WORKPLACE_PRODUCTION_STATUS_BLOCKED_OUTPUT_FULL
+			)
+
+	set_city_object_workplace_runtime_state(
+		object_id,
+		progress_work_units,
+		production_status,
+		productive_worker_count
+	)
+
+
+static func run_simulation_tick(
+	tick_index: int,
+	minutes_advanced: int
+) -> void:
+	if minutes_advanced <= 0:
+		return
+
+	ensure_city_object_definitions_ready()
+
+	var production_results: Array = (
+		WORKPLACE_PRODUCTION_SYSTEM.run_tick(
+			city_objects,
+			city_citizens,
+			city_citizen_index_by_id,
+			city_object_definitions,
+			tick_index,
+			minutes_advanced
+		)
+	)
+
+	for raw_production_result in production_results:
+		if not raw_production_result is Dictionary:
+			continue
+
+		var production_result: Dictionary = raw_production_result
+		_apply_workplace_production_result(production_result)
 
 static func reset_runtime_session_state(clear_debug: bool = false) -> void:
 	reset_world_session_state()
