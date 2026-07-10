@@ -75,6 +75,7 @@ var observed_city_container_version: int = -1
 var observed_city_public_storage_version: int = -1
 var observed_city_citizen_version: int = -1
 var observed_city_assignment_version: int = -1
+var observed_city_workplace_version: int = -1
 
 var active_city_object_placement: Dictionary = {}
 var object_info_panel: Panel
@@ -141,6 +142,7 @@ func _process(_delta: float) -> void:
 	var public_storage_changed := false
 	var city_citizens_changed := false
 	var city_assignments_changed := false
+	var city_workplaces_changed := false
 
 	if observed_city_object_version != WorldData.city_object_version:
 		observed_city_object_version = WorldData.city_object_version
@@ -172,6 +174,15 @@ func _process(_delta: float) -> void:
 		)
 		city_assignments_changed = true
 
+	if (
+		observed_city_workplace_version
+		!= WorldData.city_workplace_version
+	):
+		observed_city_workplace_version = (
+			WorldData.city_workplace_version
+		)
+		city_workplaces_changed = true
+
 	if public_storage_changed:
 		update_resource_bar_values()
 
@@ -180,6 +191,7 @@ func _process(_delta: float) -> void:
 		or city_containers_changed
 		or city_citizens_changed
 		or city_assignments_changed
+		or city_workplaces_changed
 	):
 		update_selected_object_panel()
 
@@ -1521,7 +1533,7 @@ func layout_object_info_panel(viewport_size: Vector2) -> void:
 		return
 
 	var panel_width := 240.0
-	var panel_height := 520.0
+	var panel_height := 560.0
 
 	object_info_panel.position = Vector2(
 		0.0,
@@ -1536,16 +1548,16 @@ func layout_object_info_panel(viewport_size: Vector2) -> void:
 
 	if object_info_body_label != null:
 		object_info_body_label.position = Vector2(14.0, 56.0)
-		object_info_body_label.size = Vector2(panel_width - 28.0, 260.0)
+		object_info_body_label.size = Vector2(panel_width - 28.0, 300.0)
 
 	layout_object_info_storage_rows(panel_width)
 
 func layout_object_info_storage_rows(panel_width: float) -> void:
 	if object_info_storage_title_label != null:
-		object_info_storage_title_label.position = Vector2(14.0, 326.0)
+		object_info_storage_title_label.position = Vector2(14.0, 370.0)
 		object_info_storage_title_label.size = Vector2(panel_width - 28.0, 24.0)
 
-	var row_start_y := 358.0
+	var row_start_y := 402.0
 	var row_height := 28.0
 	var icon_size := 16.0
 
@@ -1593,6 +1605,95 @@ func get_storage_panel_title_for_object(city_object: Dictionary) -> String:
 			return "Ground Pile"
 		_:
 			return "Storage"
+
+
+func get_workplace_production_status_display_name(
+	production_status: String
+) -> String:
+	match production_status:
+		WorldData.WORKPLACE_PRODUCTION_STATUS_IDLE_NO_WORKERS:
+			return "Idle - no productive workers"
+		WorldData.WORKPLACE_PRODUCTION_STATUS_WORKING:
+			return "Working"
+		WorldData.WORKPLACE_PRODUCTION_STATUS_BLOCKED_OUTPUT_FULL:
+			return "Blocked - output full"
+		WorldData.WORKPLACE_PRODUCTION_STATUS_BLOCKED_MISSING_INPUT:
+			return "Blocked - missing input"
+		WorldData.WORKPLACE_PRODUCTION_STATUS_INACTIVE:
+			return "Inactive"
+		_:
+			return production_status.capitalize()
+
+
+func format_compact_decimal(value: float) -> String:
+	var rounded_value := round(value)
+
+	if is_equal_approx(value, rounded_value):
+		return str(int(rounded_value))
+
+	return str(snappedf(value, 0.01))
+
+
+func get_workplace_output_display_text(
+	production_recipe: Dictionary
+) -> String:
+	var raw_outputs = production_recipe.get("outputs", {})
+
+	if not raw_outputs is Dictionary:
+		return "None"
+
+	var outputs: Dictionary = raw_outputs
+	var output_parts := []
+
+	for raw_resource in outputs.keys():
+		var raw_output_amount = outputs[raw_resource]
+
+		if not raw_output_amount is int:
+			continue
+
+		var output_amount: int = raw_output_amount
+
+		if output_amount <= 0:
+			continue
+
+		var output_text := str(raw_resource).capitalize()
+
+		if output_amount != 1:
+			output_text += " x" + str(output_amount)
+
+		output_parts.append(output_text)
+
+	if output_parts.is_empty():
+		return "None"
+
+	return ", ".join(output_parts)
+
+
+func get_workplace_hourly_rate_display_text(
+	city_object: Dictionary
+) -> String:
+	var hourly_rates := (
+		WorldData.get_city_object_hourly_production_rates(
+			city_object
+		)
+	)
+	var rate_parts := []
+
+	for raw_resource in hourly_rates.keys():
+		var resource := str(raw_resource)
+		var hourly_rate := float(hourly_rates[raw_resource])
+
+		rate_parts.append(
+			format_compact_decimal(hourly_rate)
+			+ " "
+			+ resource.capitalize()
+			+ "/hour"
+		)
+
+	if rate_parts.is_empty():
+		return "None"
+
+	return ", ".join(rate_parts)
 
 
 func update_selected_object_panel() -> void:
@@ -1653,6 +1754,26 @@ func update_selected_object_panel() -> void:
 			body_lines.append("- " + str(resident_name))
 	
 	elif WorldData.city_object_is_workplace(city_object):
+		var production_recipe := (
+			WorldData.get_city_object_production_recipe(
+				city_object
+			)
+		)
+
+		if not production_recipe.is_empty():
+			var production_status := (
+				WorldData.get_city_object_production_status(
+					city_object
+				)
+			)
+
+			body_lines.append(
+				"Status: "
+				+ get_workplace_production_status_display_name(
+					production_status
+				)
+			)
+
 		body_lines.append(
 			"Workers: "
 			+ str(WorldData.get_city_object_worker_count(city_object))
@@ -1660,15 +1781,78 @@ func update_selected_object_panel() -> void:
 			+ str(WorldData.get_city_object_worker_capacity(city_object))
 		)
 
+		if not production_recipe.is_empty():
+			body_lines.append(
+				"Productive: "
+				+ str(
+					WorldData.get_city_object_productive_worker_count(
+						city_object
+					)
+				)
+			)
+
 		var worker_names := WorldData.get_city_object_worker_names(city_object)
 
 		for worker_name in worker_names:
 			body_lines.append("- " + str(worker_name))
 
-		var output_resource := WorldData.get_city_object_output_resource(city_object)
+		if not production_recipe.is_empty():
+			var progress_work_units := (
+				WorldData.get_city_object_production_progress_work_units(
+					city_object
+				)
+			)
+			var work_units_per_batch := int(
+				production_recipe.get(
+					"work_units_per_batch",
+					0
+				)
+			)
+			var site_productivity_percent := (
+				float(
+					WorldData.get_city_object_site_productivity_basis_points(
+						city_object
+					)
+				)
+				/ 100.0
+			)
 
-		if output_resource != WorldData.RESOURCE_NONE:
-			body_lines.append("Output: " + output_resource)
+			body_lines.append(
+				"Output: "
+				+ get_workplace_output_display_text(
+					production_recipe
+				)
+			)
+			body_lines.append(
+				"Progress: "
+				+ str(progress_work_units)
+				+ " / "
+				+ str(work_units_per_batch)
+			)
+			body_lines.append(
+				"Rate: "
+				+ get_workplace_hourly_rate_display_text(
+					city_object
+				)
+			)
+			body_lines.append(
+				"Site productivity: "
+				+ format_compact_decimal(
+					site_productivity_percent
+				)
+				+ "%"
+			)
+		else:
+			var output_resource := (
+				WorldData.get_city_object_output_resource(
+					city_object
+				)
+			)
+
+			if output_resource != WorldData.RESOURCE_NONE:
+				body_lines.append(
+					"Output: " + output_resource.capitalize()
+				)
 
 	body_lines.append("Owner: " + str(city_object.get("owner", "none")))
 	body_lines.append("Container: " + container_text)
