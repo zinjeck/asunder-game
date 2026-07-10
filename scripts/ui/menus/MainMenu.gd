@@ -11,10 +11,11 @@ var exit_button: Button
 var dev_city_button: Button
 
 func _ready() -> void:
+	SimulationClock.suspend_simulation()
+
 	create_background()
 	create_title()
 	create_buttons()
-
 
 func create_background() -> void:
 	background = ColorRect.new()

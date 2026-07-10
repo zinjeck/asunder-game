@@ -18,3 +18,8 @@ boot_splash/show_image=false
 boot_splash/fullsize=false
 boot_splash/use_filter=false
 config/icon="res://icon.svg"
+
+[autoload]
+
+SimulationClock="*res://scripts/world/simulation/SimulationClock.gd"
+SimulationCoordinator="*res://scripts/world/simulation/SimulationCoordinator.gd"

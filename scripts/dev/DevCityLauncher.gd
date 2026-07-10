@@ -30,6 +30,9 @@ static func launch_dev_city(
 		push_error("Could not find a valid dev city region.")
 		return
 
+	SimulationClock.start_new_game()
+	SimulationCoordinator.reset_performance_statistics()
+
 	var region_center := region_top_left + Vector2i(
 		int(DEV_REGION_SIZE / 2),
 		int(DEV_REGION_SIZE / 2)

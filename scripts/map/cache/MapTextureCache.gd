@@ -195,7 +195,6 @@ func warm_texture_cache_async(source_world: WorldData, token: int) -> void:
 
 func is_warmup_still_valid(source_world: WorldData, token: int) -> bool:
 	if token != warmup_token:
-		warmup_running = false
 		return false
 
 	if owner == null:
@@ -211,7 +210,6 @@ func is_warmup_still_valid(source_world: WorldData, token: int) -> bool:
 		return false
 
 	return true
-
 
 func get_tile_color(tile: Dictionary, mode: int) -> Color:
 	if not color_provider.is_valid():

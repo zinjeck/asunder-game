@@ -678,7 +678,7 @@ func add_open_ocean_seed(world: WorldData, x: int, y: int, queue: Array[Vector2i
 	visited[position] = true
 	queue.append(position)
 
-func is_valid_river_mouth(world: WorldData, x: int, y: int) -> bool:
+func is_valid_river_mouth(_world: WorldData, x: int, y: int) -> bool:
 	return open_ocean_lookup.has(Vector2i(x, y))
 
 func create_continent(position: Vector2, rng: RandomNumberGenerator) -> Dictionary:

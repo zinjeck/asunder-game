@@ -79,13 +79,16 @@ func _ready():
 	create_hover_border_line()
 	create_region_selection_lines()
 	create_debug_panel()
+	connect_simulation_clock_signals()
 	create_world_start_background()
 	create_world_bottom_buttons()
 	create_select_region_button()
 
 	if WorldData.has_active_world_save():
+		SimulationClock.resume_simulation()
 		load_locked_world_save()
 	else:
+		SimulationClock.suspend_simulation()
 		world = null
 		print("World screen loaded. Press Generate World.")
 		queue_redraw()
@@ -104,6 +107,23 @@ func _process(_delta):
 func _exit_tree() -> void:
 	if world_texture_cache != null:
 		world_texture_cache.cancel_warmup()
+
+func connect_simulation_clock_signals() -> void:
+	var time_changed_callable := Callable(
+		self,
+		"on_simulation_time_changed"
+	)
+
+	if not SimulationClock.time_changed.is_connected(time_changed_callable):
+		SimulationClock.time_changed.connect(time_changed_callable)
+
+
+func on_simulation_time_changed(
+	_day: int,
+	_hour: int,
+	_minute: int
+) -> void:
+	update_debug_panel_text()
 
 func setup_world_texture_cache() -> void:
 	world_texture_cache.setup(
@@ -218,12 +238,20 @@ func update_debug_panel_text() -> void:
 	debug_panel_ui.refresh()
 
 func get_hovered_tile_debug_text() -> String:
+	var simulation_text := get_simulation_debug_text()
 	if world == null:
-		return "DEBUG MODE\nWorld: not generated"
+		return (
+			"DEBUG MODE\n"
+			+ simulation_text
+			+ "\n\n"
+			+ "World: not generated"
+		)
 
 	if hovered_tile.x < 0 or hovered_tile.y < 0:
 		return (
 			"DEBUG MENU\n"
+			+ simulation_text
+			+ "\n\n"
 			+ "View: " + get_view_mode_name() + "\n"
 			+ "Seed: " + str(world.seed) + "\n"
 			+ "\n"
@@ -250,6 +278,8 @@ func get_hovered_tile_debug_text() -> String:
 
 	return (
 		"DEBUG INFO\n"
+		+ simulation_text
+		+ "\n\n"
 		+ "View: " + get_view_mode_name() + "\n"
 		+ "Seed: " + str(world.seed) + "\n"
 		+ "\n"
@@ -268,6 +298,12 @@ func get_hovered_tile_debug_text() -> String:
 		+ "Coastal: " + DebugPanel.bool_to_yes_no(is_coastal)
 	)
 
+func get_simulation_debug_text() -> String:
+	return (
+		SimulationClock.get_debug_text()
+		+ "\n"
+		+ SimulationCoordinator.get_debug_text()
+	)
 
 func get_view_mode_name() -> String:
 	return MapVisuals.get_view_mode_name(view_mode)
@@ -883,6 +919,10 @@ func on_generate_world_button_pressed() -> void:
 	WorldData.clear_visual_texture_caches()
 
 	world = generator.generate_world()
+
+	SimulationClock.start_new_game()
+	SimulationCoordinator.reset_performance_statistics()
+
 	print("Generated world seed: ", world.seed)
 
 	if world_start_background != null:

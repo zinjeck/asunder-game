@@ -63,11 +63,15 @@ static var official_region_size: int = 0
 static var official_world_scene_path: String = ""
 static var official_city_scene_path: String = ""
 static var city_resource_amounts: Dictionary = {}
+
 static var city_objects: Array = []
+static var city_object_index_by_id: Dictionary = {}
 static var city_storage_version: int = 0
 static var city_occupied_tiles: Dictionary = {}
 static var next_city_object_id: int = 1
+
 static var city_citizens: Array = []
+static var city_citizen_index_by_id: Dictionary = {}
 static var next_city_citizen_id: int = 1
 static var city_citizen_first_name_pool: Array = [
 	"Arlen",
@@ -109,7 +113,50 @@ static var city_citizen_first_name_pool: Array = [
 	"Vela",
 	"Seris",
 	"Amara",
-	"Coralie"
+	"Coralie",
+	# Additional male-coded names
+	"Aldren",
+	"Beran",
+	"Cedran",
+	"Doran",
+	"Evren",
+	"Garric",
+	"Hadren",
+	"Ivarn",
+	"Joren",
+	"Kellan",
+	"Merek",
+	"Nolan",
+	"Odran",
+	"Perric",
+	"Roder",
+	"Stellan",
+	"Torren",
+	"Ulren",
+	"Wystan",
+	"Yorick",
+
+	# Additional female-coded names
+	"Aveline",
+	"Briala",
+	"Ceryn",
+	"Delara",
+	"Eirwen",
+	"Fiora",
+	"Giselle",
+	"Halia",
+	"Ilara",
+	"Jessamine",
+	"Kerra",
+	"Lenora",
+	"Mirelle",
+	"Nerissa",
+	"Odelle",
+	"Petra",
+	"Roselyn",
+	"Sabine",
+	"Thalia",
+	"Ysara"
 ]
 
 const STARTING_CITY_POPULATION := 8
@@ -561,11 +608,236 @@ static func get_total_stored_city_resource_amount(resource: String) -> int:
 static func get_total_city_resource_storage_capacity(resource: String) -> int:
 	return get_total_public_city_resource_storage_capacity(resource)
 
+static func rebuild_city_object_index() -> void:
+	city_object_index_by_id.clear()
+
+	for object_index in range(city_objects.size()):
+		var raw_city_object = city_objects[object_index]
+
+		if not raw_city_object is Dictionary:
+			continue
+
+		var city_object: Dictionary = raw_city_object
+		var object_id := int(city_object.get("id", -1))
+
+		if object_id < 0:
+			continue
+
+		if city_object_index_by_id.has(object_id):
+			push_error(
+				"Duplicate city object ID while rebuilding index: "
+				+ str(object_id)
+			)
+			continue
+
+		city_object_index_by_id[object_id] = object_index
+
+
+static func rebuild_city_citizen_index() -> void:
+	city_citizen_index_by_id.clear()
+
+	for citizen_index in range(city_citizens.size()):
+		var raw_citizen = city_citizens[citizen_index]
+
+		if not raw_citizen is Dictionary:
+			continue
+
+		var citizen: Dictionary = raw_citizen
+		var citizen_id := int(citizen.get("id", -1))
+
+		if citizen_id < 0:
+			continue
+
+		if city_citizen_index_by_id.has(citizen_id):
+			push_error(
+				"Duplicate city citizen ID while rebuilding index: "
+				+ str(citizen_id)
+			)
+			continue
+
+		city_citizen_index_by_id[citizen_id] = citizen_index
+
+
+static func rebuild_city_entity_indexes() -> void:
+	rebuild_city_object_index()
+	rebuild_city_citizen_index()
+
+
+static func _register_city_object_index(
+	city_object: Dictionary,
+	object_index: int
+) -> void:
+	if city_object.is_empty():
+		return
+
+	if object_index < 0 or object_index >= city_objects.size():
+		push_error(
+			"Cannot register city object index outside the object array: "
+			+ str(object_index)
+		)
+		return
+
+	var object_id := int(city_object.get("id", -1))
+
+	if object_id < 0:
+		push_error("Cannot register city object without a valid ID.")
+		return
+
+	if city_object_index_by_id.has(object_id):
+		var existing_index := int(city_object_index_by_id[object_id])
+
+		if existing_index != object_index:
+			push_error(
+				"Duplicate city object ID detected: "
+				+ str(object_id)
+			)
+			return
+
+	city_object_index_by_id[object_id] = object_index
+
+
+static func _register_city_citizen_index(
+	citizen: Dictionary,
+	citizen_index: int
+) -> void:
+	if citizen.is_empty():
+		return
+
+	if citizen_index < 0 or citizen_index >= city_citizens.size():
+		push_error(
+			"Cannot register city citizen index outside the citizen array: "
+			+ str(citizen_index)
+		)
+		return
+
+	var citizen_id := int(citizen.get("id", -1))
+
+	if citizen_id < 0:
+		push_error("Cannot register city citizen without a valid ID.")
+		return
+
+	if city_citizen_index_by_id.has(citizen_id):
+		var existing_index := int(city_citizen_index_by_id[citizen_id])
+
+		if existing_index != citizen_index:
+			push_error(
+				"Duplicate city citizen ID detected: "
+				+ str(citizen_id)
+			)
+			return
+
+	city_citizen_index_by_id[citizen_id] = citizen_index
+
+
+static func get_city_object_index_by_id(object_id: int) -> int:
+	if object_id < 0:
+		return -1
+
+	if not city_object_index_by_id.has(object_id):
+		return -1
+
+	var object_index := int(city_object_index_by_id[object_id])
+
+	if object_index < 0 or object_index >= city_objects.size():
+		push_error(
+			"Stale city object index for object ID "
+			+ str(object_id)
+		)
+
+		city_object_index_by_id.erase(object_id)
+		return -1
+
+	var raw_city_object = city_objects[object_index]
+
+	if not raw_city_object is Dictionary:
+		push_error(
+			"City object index points to non-Dictionary data for object ID "
+			+ str(object_id)
+		)
+
+		city_object_index_by_id.erase(object_id)
+		return -1
+
+	var city_object: Dictionary = raw_city_object
+	var indexed_object_id := int(city_object.get("id", -1))
+
+	if indexed_object_id != object_id:
+		push_error(
+			"City object index mismatch for requested ID "
+			+ str(object_id)
+			+ ". Indexed object contains ID "
+			+ str(indexed_object_id)
+		)
+
+		city_object_index_by_id.erase(object_id)
+		return -1
+
+	return object_index
+
+
+static func get_city_citizen_index_by_id(citizen_id: int) -> int:
+	if citizen_id < 0:
+		return -1
+
+	if not city_citizen_index_by_id.has(citizen_id):
+		return -1
+
+	var citizen_index := int(city_citizen_index_by_id[citizen_id])
+
+	if citizen_index < 0 or citizen_index >= city_citizens.size():
+		push_error(
+			"Stale city citizen index for citizen ID "
+			+ str(citizen_id)
+		)
+
+		city_citizen_index_by_id.erase(citizen_id)
+		return -1
+
+	var raw_citizen = city_citizens[citizen_index]
+
+	if not raw_citizen is Dictionary:
+		push_error(
+			"City citizen index points to non-Dictionary data for citizen ID "
+			+ str(citizen_id)
+		)
+
+		city_citizen_index_by_id.erase(citizen_id)
+		return -1
+
+	var citizen: Dictionary = raw_citizen
+	var indexed_citizen_id := int(citizen.get("id", -1))
+
+	if indexed_citizen_id != citizen_id:
+		push_error(
+			"City citizen index mismatch for requested ID "
+			+ str(citizen_id)
+			+ ". Indexed citizen contains ID "
+			+ str(indexed_citizen_id)
+		)
+
+		city_citizen_index_by_id.erase(citizen_id)
+		return -1
+
+	return citizen_index
+
+
+static func get_city_object_by_id(object_id: int) -> Dictionary:
+	var object_index := get_city_object_index_by_id(object_id)
+
+	if object_index < 0:
+		return {}
+
+	var raw_city_object = city_objects[object_index]
+
+	if not raw_city_object is Dictionary:
+		return {}
+
+	return raw_city_object
 
 static func reset_city_citizen_state() -> void:
 	city_citizens.clear()
+	city_citizen_index_by_id.clear()
 	next_city_citizen_id = 1
-
 
 static func make_empty_citizen_inventory() -> Dictionary:
 	return make_empty_resource_container(get_city_resource_types())
@@ -664,9 +936,13 @@ static func make_city_citizen(display_name: String = "") -> Dictionary:
 
 static func add_city_citizen(display_name: String = "") -> Dictionary:
 	var citizen := make_city_citizen(display_name)
-	city_citizens.append(citizen)
-	return citizen
 
+	city_citizens.append(citizen)
+
+	var citizen_index := city_citizens.size() - 1
+	_register_city_citizen_index(citizen, citizen_index)
+
+	return citizen
 
 static func ensure_starting_city_population() -> void:
 	if not city_citizens.is_empty():
@@ -716,15 +992,17 @@ static func get_city_unemployed_citizen_count() -> int:
 static func get_city_citizen_by_id(citizen_id: int) -> Dictionary:
 	ensure_starting_city_population()
 
-	for citizen in city_citizens:
-		if not citizen is Dictionary:
-			continue
+	var citizen_index := get_city_citizen_index_by_id(citizen_id)
 
-		if int(citizen.get("id", -1)) == citizen_id:
-			return citizen
+	if citizen_index < 0:
+		return {}
 
-	return {}
+	var raw_citizen = city_citizens[citizen_index]
 
+	if not raw_citizen is Dictionary:
+		return {}
+
+	return raw_citizen
 
 static func get_city_citizen_display_name(citizen_id: int) -> String:
 	var citizen := get_city_citizen_by_id(citizen_id)
@@ -1144,6 +1422,7 @@ static func reset_player_city_state() -> void:
 
 static func reset_city_object_state() -> void:
 	city_objects.clear()
+	city_object_index_by_id.clear()
 	city_occupied_tiles.clear()
 	next_city_object_id = 1
 	city_storage_version += 1
@@ -1276,6 +1555,10 @@ static func add_city_object(
 	next_city_object_id += 1
 
 	city_objects.append(city_object)
+
+	var object_index := city_objects.size() - 1
+	_register_city_object_index(city_object, object_index)
+
 	occupy_city_object_tiles(city_object)
 
 	var should_refresh_city_ui := false
@@ -1410,38 +1693,47 @@ static func set_city_object_stored_resource_amount(
 	resource: String,
 	amount: int
 ) -> void:
-	for i in range(city_objects.size()):
-		var city_object: Dictionary = city_objects[i]
+	var object_index := get_city_object_index_by_id(object_id)
 
-		if int(city_object.get("id", -1)) != object_id:
-			continue
-
-		if not can_city_object_store_resource(city_object, resource):
-			return
-
-		var stored_resources = city_object.get("stored_resources", {})
-
-		if not stored_resources is Dictionary or stored_resources.is_empty():
-			stored_resources = make_empty_city_object_storage_for_type(str(city_object.get("type", "")))
-
-		var safe_amount: int = max(0, amount)
-		var capacity: int = get_city_object_storage_capacity_for_resource(city_object, resource)
-
-		if capacity > 0:
-			safe_amount = min(safe_amount, capacity)
-
-		var old_amount := int(stored_resources.get(resource, 0))
-
-		if old_amount == safe_amount:
-			return
-
-		stored_resources[resource] = safe_amount
-		city_object["stored_resources"] = stored_resources
-		city_objects[i] = city_object
-
-		city_storage_version += 1
+	if object_index < 0:
 		return
 
+	var raw_city_object = city_objects[object_index]
+
+	if not raw_city_object is Dictionary:
+		return
+
+	var city_object: Dictionary = raw_city_object
+
+	if not can_city_object_store_resource(city_object, resource):
+		return
+
+	var stored_resources = city_object.get("stored_resources", {})
+
+	if not stored_resources is Dictionary or stored_resources.is_empty():
+		stored_resources = make_empty_city_object_storage_for_type(
+			str(city_object.get("type", ""))
+		)
+
+	var safe_amount := maxi(amount, 0)
+	var capacity := get_city_object_storage_capacity_for_resource(
+		city_object,
+		resource
+	)
+
+	if capacity > 0:
+		safe_amount = mini(safe_amount, capacity)
+
+	var old_amount := int(stored_resources.get(resource, 0))
+
+	if old_amount == safe_amount:
+		return
+
+	stored_resources[resource] = safe_amount
+	city_object["stored_resources"] = stored_resources
+	city_objects[object_index] = city_object
+
+	city_storage_version += 1
 
 static func add_resource_to_city_object_storage(
 	object_id: int,
@@ -1451,32 +1743,42 @@ static func add_resource_to_city_object_storage(
 	if amount_delta <= 0:
 		return 0
 
-	for i in range(city_objects.size()):
-		var city_object: Dictionary = city_objects[i]
+	var object_index := get_city_object_index_by_id(object_id)
 
-		if int(city_object.get("id", -1)) != object_id:
-			continue
+	if object_index < 0:
+		return 0
 
-		if not can_city_object_store_resource(city_object, resource):
-			return 0
+	var raw_city_object = city_objects[object_index]
 
-		var free_space := get_city_object_resource_free_space(city_object, resource)
+	if not raw_city_object is Dictionary:
+		return 0
 
-		if free_space <= 0:
-			return 0
+	var city_object: Dictionary = raw_city_object
 
-		var accepted_amount: int = min(amount_delta, free_space)
-		var current_amount := get_city_object_stored_resource_amount(city_object, resource)
+	if not can_city_object_store_resource(city_object, resource):
+		return 0
 
-		set_city_object_stored_resource_amount(
-			object_id,
-			resource,
-			current_amount + accepted_amount
-		)
+	var free_space := get_city_object_resource_free_space(
+		city_object,
+		resource
+	)
 
-		return accepted_amount
+	if free_space <= 0:
+		return 0
 
-	return 0
+	var accepted_amount := mini(amount_delta, free_space)
+	var current_amount := get_city_object_stored_resource_amount(
+		city_object,
+		resource
+	)
+
+	set_city_object_stored_resource_amount(
+		object_id,
+		resource,
+		current_amount + accepted_amount
+	)
+
+	return accepted_amount
 
 static func occupy_city_object_tiles(city_object: Dictionary) -> void:
 	var object_id: int = int(city_object.get("id", -1))
@@ -1496,14 +1798,8 @@ static func get_city_object_at_tile(tile_position: Vector2i) -> Dictionary:
 	if not city_occupied_tiles.has(tile_position):
 		return {}
 
-	var object_id: int = int(city_occupied_tiles[tile_position])
-
-	for city_object in city_objects:
-		if int(city_object["id"]) == object_id:
-			return city_object
-
-	return {}
-
+	var object_id := int(city_occupied_tiles[tile_position])
+	return get_city_object_by_id(object_id)
 
 static func has_city_object_type(object_type: String) -> bool:
 	for city_object in city_objects:
@@ -1560,6 +1856,9 @@ static func add_city_road_object(tile_positions: Array, object_owner: String = "
 
 	next_city_object_id += 1
 	city_objects.append(city_object)
+
+	var object_index := city_objects.size() - 1
+	_register_city_object_index(city_object, object_index)
 
 	for tile_position in clean_tiles:
 		city_occupied_tiles[tile_position] = int(city_object["id"])
@@ -1643,6 +1942,15 @@ static func clear_city_map_texture_cache() -> void:
 	city_map_texture_cache_seed = -1
 	city_map_texture_cache_size = Vector2i.ZERO
 
+static func run_simulation_tick(
+	_tick_index: int,
+	_minutes_advanced: int
+) -> void:
+	# The global simulation coordinator reaches WorldData here.
+	#
+	# This remains intentionally empty until the clock has been tested
+	# across world and city scene transitions.
+	pass
 
 static func reset_runtime_session_state(clear_debug: bool = false) -> void:
 	reset_world_session_state()
@@ -1652,7 +1960,6 @@ static func reset_runtime_session_state(clear_debug: bool = false) -> void:
 
 	if clear_debug:
 		debug_mode_enabled = false
-
 
 static func reset_world_session_state() -> void:
 	save_locked = false
@@ -1695,7 +2002,6 @@ static func reset_city_camera_state() -> void:
 	has_city_camera_state = false
 	city_camera_position = Vector2.ZERO
 	city_camera_zoom = Vector2.ONE
-
 
 static func clear_visual_texture_caches() -> void:
 	clear_world_map_texture_cache()

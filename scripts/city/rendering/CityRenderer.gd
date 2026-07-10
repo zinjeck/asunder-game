@@ -34,14 +34,14 @@ var city_texture_cache := MapTextureCache.new()
 var debug_panel_ui: DebugPanel
 var debug_panel_position: Vector2 = Vector2.ZERO
 var debug_panel_padding: Vector2 = Vector2(12.0, 10.0)
-var debug_panel_min_size: Vector2 = Vector2(330.0, 170.0)
+var debug_panel_min_size: Vector2 = Vector2(430.0, 170.0)
 var citizen_debug_button: Button
 var citizen_debug_panel: Panel
 var citizen_debug_title_label: Label
 var citizen_debug_body_label: Label
 var is_citizen_debug_panel_open: bool = false
 
-const CITIZEN_DEBUG_BUTTON_POSITION: Vector2 = Vector2(154.0, 28.0)
+const CITIZEN_DEBUG_BUTTON_POSITION: Vector2 = Vector2(270.0, 28.0)
 const CITIZEN_DEBUG_BUTTON_SIZE: Vector2 = Vector2(145.0, 26.0)
 const CITIZEN_DEBUG_PANEL_MARGIN: float = 10.0
 const CITIZEN_DEBUG_PANEL_SIZE: Vector2 = Vector2(540.0, 300.0)
@@ -107,6 +107,8 @@ func _ready() -> void:
 	create_city_camera()
 	create_city_ui()
 	create_debug_panel()
+	connect_simulation_clock_signals()
+	SimulationClock.resume_simulation()
 	update_debug_panel_text()
 	queue_redraw()
 
@@ -227,6 +229,26 @@ func _unhandled_input(event: InputEvent) -> void:
 			update_object_selection_drag(event.position)
 			get_viewport().set_input_as_handled()
 			return
+
+func connect_simulation_clock_signals() -> void:
+	var time_changed_callable := Callable(
+		self,
+		"on_simulation_time_changed"
+	)
+
+	if not SimulationClock.time_changed.is_connected(time_changed_callable):
+		SimulationClock.time_changed.connect(time_changed_callable)
+
+
+func on_simulation_time_changed(
+	_day: int,
+	_hour: int,
+	_minute: int
+) -> void:
+	if debug_panel_ui == null:
+		return
+
+	debug_panel_ui.refresh()
 
 func get_debug_stockpile_resource_for_key(key_event: InputEventKey) -> String:
 	if key_event.keycode == KEY_H or key_event.physical_keycode == KEY_H:
@@ -1916,10 +1938,6 @@ func cancel_road_placement() -> void:
 
 	print("Road placement canceled.")
 
-	queue_redraw()
-
-	print("Road placement canceled.")
-
 func cancel_build_placement() -> void:
 	cancel_road_placement()
 
@@ -2130,7 +2148,6 @@ func is_city_object_selectable(city_object: Dictionary) -> bool:
 
 	return true
 
-
 func get_city_object_by_id(object_id) -> Dictionary:
 	if object_id == null:
 		return {}
@@ -2138,20 +2155,12 @@ func get_city_object_by_id(object_id) -> Dictionary:
 	if typeof(object_id) != TYPE_INT:
 		return {}
 
-	var safe_object_id: int = int(object_id)
+	var safe_object_id := int(object_id)
 
 	if safe_object_id < 0:
 		return {}
 
-	for city_object in WorldData.city_objects:
-		if not city_object.has("id"):
-			continue
-
-		if int(city_object["id"]) == safe_object_id:
-			return city_object
-
-	return {}
-
+	return WorldData.get_city_object_by_id(safe_object_id)
 
 func get_city_object_display_name(city_object: Dictionary) -> String:
 	if city_object.is_empty():
@@ -3359,8 +3368,20 @@ func update_citizen_debug_list_text() -> void:
 	if citizen_debug_body_label == null:
 		return
 
+	if not WorldData.debug_mode_enabled:
+		return
+
+	if not is_citizen_debug_panel_open:
+		return
+
 	citizen_debug_body_label.text = get_citizen_debug_list_text()
 
+func get_simulation_debug_text() -> String:
+	return (
+		SimulationClock.get_debug_text()
+		+ "\n"
+		+ SimulationCoordinator.get_debug_text()
+	)
 
 func get_citizen_debug_list_text() -> String:
 	var citizens := WorldData.get_city_citizen_snapshot()
@@ -3456,11 +3477,21 @@ func toggle_debug_mode() -> void:
 		print("Debug mode: OFF")
 
 func get_city_debug_panel_text() -> String:
+	var simulation_text := get_simulation_debug_text()
+
 	if city_world == null:
-		return "DEBUG INFO\nScene: City\nCity world: not generated"
+		return (
+			"DEBUG INFO\n"
+			+ simulation_text
+			+ "\n\n"
+			+ "Scene: City\n"
+			+ "City world: not generated"
+		)
 
 	var base_text := (
 		"DEBUG INFO\n"
+		+ simulation_text
+		+ "\n\n"
 		+ "Scene: City\n"
 		+ "View: " + get_city_map_mode_name(city_view_mode) + "\n"
 		+ "Seed: " + str(city_seed) + "\n"
