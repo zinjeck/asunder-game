@@ -3,6 +3,236 @@ class_name WorkplaceProductionSystem
 
 const WORK_UNITS_PER_WORKER_MINUTE: int = 1_000
 
+# Read-only Phase 2D source evaluation.
+# This currently reports environmental source geometry without changing
+# site productivity or advancing production.
+static func get_resource_source_evaluation(
+	city_object: Dictionary
+) -> Dictionary:
+	var result := {
+		"evaluated": false,
+		"mode": WorldData.WORKPLACE_RESOURCE_SOURCE_MODE_NONE,
+		"resource_type": WorldData.RESOURCE_NONE,
+		"radius_tiles": 0,
+		"anchor_position": Vector2.ZERO,
+		"candidate_tile_count": 0,
+		"valid_source_tile_count": 0,
+		"source_density_basis_points": 0
+	}
+
+	if city_object.is_empty():
+		return result
+
+	var policy := WorldData.get_city_object_resource_source_policy(
+		city_object
+	)
+
+	if policy.is_empty():
+		return result
+
+	var mode := str(
+		policy.get(
+			"mode",
+			WorldData.WORKPLACE_RESOURCE_SOURCE_MODE_NONE
+		)
+	)
+
+	result["mode"] = mode
+
+	match mode:
+		WorldData.WORKPLACE_RESOURCE_SOURCE_MODE_RADIUS:
+			return _evaluate_radius_resource_source(
+				city_object,
+				policy,
+				result
+			)
+
+		WorldData.WORKPLACE_RESOURCE_SOURCE_MODE_NONE:
+			result["evaluated"] = true
+
+	return result
+
+
+static func _evaluate_radius_resource_source(
+	city_object: Dictionary,
+	policy: Dictionary,
+	result: Dictionary
+) -> Dictionary:
+	var raw_resource_type = policy.get(
+		"resource_type",
+		WorldData.RESOURCE_NONE
+	)
+	var raw_radius_tiles = policy.get("radius_tiles", 0)
+	var raw_anchor_mode = policy.get(
+		"anchor_mode",
+		WorldData.WORKPLACE_ANCHOR_MODE_FOOTPRINT_CENTER
+	)
+
+	if typeof(raw_resource_type) != TYPE_STRING:
+		return result
+
+	if typeof(raw_radius_tiles) != TYPE_INT:
+		return result
+
+	if typeof(raw_anchor_mode) != TYPE_STRING:
+		return result
+
+	var resource_type: String = raw_resource_type
+	var radius_tiles: int = raw_radius_tiles
+	var anchor_mode: String = raw_anchor_mode
+
+	result["resource_type"] = resource_type
+	result["radius_tiles"] = radius_tiles
+
+	if radius_tiles <= 0:
+		return result
+
+	if not WorldData.get_city_resource_types().has(resource_type):
+		return result
+
+	if not WorldData.is_valid_workplace_anchor_mode(anchor_mode):
+		return result
+
+	var anchor_result := _get_workplace_source_anchor(
+		city_object,
+		anchor_mode
+	)
+
+	if not bool(anchor_result.get("valid", false)):
+		return result
+
+	var raw_source_world = WorldData.official_city_world
+
+	if not raw_source_world is WorldData:
+		return result
+
+	var source_world: WorldData = raw_source_world
+
+	if source_world.width <= 0 or source_world.height <= 0:
+		return result
+
+	var anchor_position: Vector2 = anchor_result.get(
+		"position",
+		Vector2.ZERO
+	)
+	var radius_distance := float(radius_tiles)
+	var radius_squared := radius_distance * radius_distance
+
+	result["anchor_position"] = anchor_position
+
+	var minimum_x := maxi(
+		int(floor(anchor_position.x - radius_distance)),
+		0
+	)
+	var maximum_x := mini(
+		int(ceil(anchor_position.x + radius_distance)),
+		source_world.width - 1
+	)
+	var minimum_y := maxi(
+		int(floor(anchor_position.y - radius_distance)),
+		0
+	)
+	var maximum_y := mini(
+		int(ceil(anchor_position.y + radius_distance)),
+		source_world.height - 1
+	)
+
+	var candidate_tile_count := 0
+	var valid_source_tile_count := 0
+
+	for y in range(minimum_y, maximum_y + 1):
+		for x in range(minimum_x, maximum_x + 1):
+			var tile_center := Vector2(
+				float(x) + 0.5,
+				float(y) + 0.5
+			)
+
+			if (
+				tile_center.distance_squared_to(anchor_position)
+				> radius_squared
+			):
+				continue
+
+			candidate_tile_count += 1
+
+			var tile: Dictionary = source_world.get_tile(x, y)
+
+			if (
+				str(
+					tile.get(
+						"resource",
+						WorldData.RESOURCE_NONE
+					)
+				)
+				== resource_type
+			):
+				valid_source_tile_count += 1
+
+	var source_density_basis_points := 0
+
+	if candidate_tile_count > 0:
+		source_density_basis_points = clampi(
+			int(
+				round(
+					float(valid_source_tile_count)
+					* float(
+						WorldData.PRODUCTIVITY_BASIS_POINTS_SCALE
+					)
+					/ float(candidate_tile_count)
+				)
+			),
+			0,
+			WorldData.PRODUCTIVITY_BASIS_POINTS_SCALE
+		)
+
+	result["candidate_tile_count"] = candidate_tile_count
+	result["valid_source_tile_count"] = valid_source_tile_count
+	result["source_density_basis_points"] = (
+		source_density_basis_points
+	)
+	result["evaluated"] = true
+
+	return result
+
+
+static func _get_workplace_source_anchor(
+	city_object: Dictionary,
+	anchor_mode: String
+) -> Dictionary:
+	var result := {
+		"valid": false,
+		"position": Vector2.ZERO
+	}
+
+	if (
+		anchor_mode
+		!= WorldData.WORKPLACE_ANCHOR_MODE_FOOTPRINT_CENTER
+	):
+		return result
+
+	var raw_top_left = city_object.get("top_left", null)
+	var raw_size_tiles = city_object.get("size", null)
+
+	if not raw_top_left is Vector2i:
+		return result
+
+	if not raw_size_tiles is Vector2i:
+		return result
+
+	var top_left: Vector2i = raw_top_left
+	var size_tiles: Vector2i = raw_size_tiles
+
+	if size_tiles.x <= 0 or size_tiles.y <= 0:
+		return result
+
+	result["position"] = Vector2(
+		float(top_left.x) + float(size_tiles.x) * 0.5,
+		float(top_left.y) + float(size_tiles.y) * 0.5
+	)
+	result["valid"] = true
+
+	return result
+
 static func get_estimated_output_per_hour(
 	city_object: Dictionary,
 	resource: String
