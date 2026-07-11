@@ -1816,7 +1816,66 @@ func update_selected_object_panel() -> void:
 				+ output_resource
 				+ "/hour"
 			)
+		var source_evaluation := (
+			WorkplaceProductionSystem.get_resource_source_evaluation(
+				city_object
+			)
+		)
 
+		if bool(source_evaluation.get("evaluated", false)):
+			var source_resource := str(
+				source_evaluation.get(
+					"resource_type",
+					WorldData.RESOURCE_NONE
+				)
+			)
+
+			if source_resource != WorldData.RESOURCE_NONE:
+				var valid_source_tiles := int(
+					source_evaluation.get(
+						"valid_source_tile_count",
+						0
+					)
+				)
+				var candidate_source_tiles := int(
+					source_evaluation.get(
+						"candidate_tile_count",
+						0
+					)
+				)
+				var source_density_percentage := (
+					float(
+						source_evaluation.get(
+							"source_density_basis_points",
+							0
+						)
+					)
+					/ 100.0
+				)
+				var source_radius := int(
+					source_evaluation.get(
+						"radius_tiles",
+						0
+					)
+				)
+
+				body_lines.append(
+					source_resource.capitalize()
+					+ " Source: "
+					+ str(valid_source_tiles)
+					+ " / "
+					+ str(candidate_source_tiles)
+					+ " tiles"
+				)
+
+				body_lines.append(
+					"Density: "
+					+ format_compact_production_number(
+						source_density_percentage
+					)
+					+ "% | Radius: "
+					+ str(source_radius)
+				)
 		var site_productivity_percentage := (
 			float(
 				WorldData.get_city_object_site_productivity_basis_points(
