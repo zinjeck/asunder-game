@@ -49,13 +49,40 @@ func _process(delta: float) -> void:
 
 
 func _input(event: InputEvent) -> void:
+	if event is InputEventKey and event.pressed and not event.echo:
+		if not WorldData.debug_mode_enabled:
+			return
+
+		var key_event: InputEventKey = event
+
+		var is_zoom_in_key: bool = (
+			key_event.keycode == KEY_EQUAL
+			or key_event.physical_keycode == KEY_EQUAL
+			or key_event.unicode == 61
+		)
+
+		var is_zoom_out_key: bool = (
+			key_event.keycode == KEY_MINUS
+			or key_event.physical_keycode == KEY_MINUS
+			or key_event.unicode == 45
+		)
+
+		if is_zoom_in_key:
+			zoom_camera(1.0 + zoom_speed)
+			get_viewport().set_input_as_handled()
+			return
+
+		if is_zoom_out_key:
+			zoom_camera(1.0 - zoom_speed)
+			get_viewport().set_input_as_handled()
+			return
+
 	if event is InputEventMouseButton and event.pressed:
 		if event.button_index == MOUSE_BUTTON_WHEEL_UP:
 			zoom_camera(1.0 + zoom_speed)
 
 		elif event.button_index == MOUSE_BUTTON_WHEEL_DOWN:
 			zoom_camera(1.0 - zoom_speed)
-
 
 func get_camera_movement_direction() -> Vector2:
 	var direction: Vector2 = Vector2.ZERO
