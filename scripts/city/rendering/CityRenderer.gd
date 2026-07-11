@@ -1571,17 +1571,17 @@ func layout_object_info_panel(viewport_size: Vector2) -> void:
 		object_info_body_label.position = Vector2(14.0, 56.0)
 		object_info_body_label.size = Vector2(
 			panel_width - 28.0,
-			330.0
+			370.0
 		)
 
 	layout_object_info_storage_rows(panel_width)
 
 func layout_object_info_storage_rows(panel_width: float) -> void:
 	if object_info_storage_title_label != null:
-		object_info_storage_title_label.position = Vector2(14.0, 396.0)
+		object_info_storage_title_label.position = Vector2(14.0, 436.0)
 		object_info_storage_title_label.size = Vector2(panel_width - 28.0, 24.0)
 
-	var row_start_y := 428.0
+	var row_start_y := 468.0
 	var row_height := 28.0
 	var icon_size := 16.0
 
