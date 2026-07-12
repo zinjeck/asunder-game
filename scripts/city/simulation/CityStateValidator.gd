@@ -43,6 +43,10 @@ static func validate(
 		errors,
 		citizen_lookup
 	)
+	_validate_city_citizen_movement_state(
+		errors,
+		citizen_lookup
+	)
 
 	var checked_container_count := _validate_city_containers(
 		errors,
@@ -88,6 +92,9 @@ static func validate(
 		"citizen_version": WorldData.city_citizen_version,
 		"citizen_spatial_version": (
 			WorldData.city_citizen_spatial_version
+		),
+		"citizen_movement_version": (
+			WorldData.city_citizen_movement_version
 		),
 		"assignment_version": WorldData.city_assignment_version,
 		"workplace_version": WorldData.city_workplace_version
@@ -141,7 +148,6 @@ static func get_summary_text() -> String:
 		+ "%.3f ms" % duration_msec
 	)
 
-
 static func _validation_cache_matches_current_state() -> bool:
 	if _cached_result.is_empty():
 		return false
@@ -172,6 +178,17 @@ static func _validation_cache_matches_current_state() -> bool:
 			)
 		)
 		!= WorldData.city_citizen_spatial_version
+	):
+		return false
+
+	if (
+		int(
+			_cached_result.get(
+				"citizen_movement_version",
+				-1
+			)
+		)
+		!= WorldData.city_citizen_movement_version
 	):
 		return false
 
@@ -930,6 +947,401 @@ static func _validate_city_citizen_demographics(
 					+ " male and "
 					+ str(female_count)
 					+ " female citizens."
+			)
+
+static func _validate_city_citizen_movement_state(
+	errors: Array[String],
+	citizen_lookup: Dictionary
+) -> void:
+	var city_world = WorldData.official_city_world
+	var expected_active_ids: Dictionary = {}
+	var required_fields := [
+		"movement_state",
+		"movement_path",
+		"movement_path_index",
+		"movement_progress_basis_points",
+		"movement_destination_tile",
+		"movement_speed_basis_points_per_minute",
+		"movement_failure_reason"
+	]
+
+	for citizen_id in citizen_lookup.keys():
+		var citizen_index := int(
+			citizen_lookup[citizen_id]
+		)
+		var citizen: Dictionary = (
+			WorldData.city_citizens[citizen_index]
+		)
+		var missing_field := false
+
+		for field_name in required_fields:
+			if citizen.has(field_name):
+				continue
+
+			errors.append(
+				"Citizen "
+				+ str(citizen_id)
+				+ " is missing movement field '"
+				+ str(field_name)
+				+ "'."
+			)
+			missing_field = true
+
+		if missing_field:
+			continue
+
+		var raw_state = citizen.get("movement_state")
+		var raw_path = citizen.get("movement_path")
+		var raw_index = citizen.get("movement_path_index")
+		var raw_progress = citizen.get(
+			"movement_progress_basis_points"
+		)
+		var raw_destination = citizen.get(
+			"movement_destination_tile"
+		)
+		var raw_speed = citizen.get(
+			"movement_speed_basis_points_per_minute"
+		)
+		var raw_failure = citizen.get(
+			"movement_failure_reason"
+		)
+
+		if typeof(raw_state) != TYPE_STRING:
+			errors.append(
+				"Citizen "
+					+ str(citizen_id)
+					+ " has non-string movement state."
+			)
+			continue
+
+		var movement_state: String = raw_state
+
+		if not WorldData.is_valid_city_citizen_movement_state(
+			movement_state
+		):
+			errors.append(
+				"Citizen "
+					+ str(citizen_id)
+					+ " has invalid movement state '"
+					+ movement_state
+					+ "'."
+			)
+			continue
+
+		if not raw_path is Array:
+			errors.append(
+				"Citizen "
+					+ str(citizen_id)
+					+ " has non-Array movement path."
+			)
+			continue
+
+		if typeof(raw_index) != TYPE_INT:
+			errors.append(
+				"Citizen "
+					+ str(citizen_id)
+					+ " has non-integer movement path index."
+			)
+			continue
+
+		if typeof(raw_progress) != TYPE_INT:
+			errors.append(
+				"Citizen "
+					+ str(citizen_id)
+					+ " has non-integer movement progress."
+			)
+			continue
+
+		if not raw_destination is Vector2i:
+			errors.append(
+				"Citizen "
+					+ str(citizen_id)
+					+ " has non-Vector2i movement destination."
+			)
+			continue
+
+		if typeof(raw_speed) != TYPE_INT or int(raw_speed) <= 0:
+			errors.append(
+				"Citizen "
+					+ str(citizen_id)
+					+ " has invalid movement speed."
+			)
+			continue
+
+		if typeof(raw_failure) != TYPE_STRING:
+			errors.append(
+				"Citizen "
+					+ str(citizen_id)
+					+ " has non-string movement failure reason."
+			)
+			continue
+
+		if not WorldData.is_valid_city_citizen_movement_failure(
+			str(raw_failure)
+		):
+			errors.append(
+				"Citizen "
+					+ str(citizen_id)
+					+ " has invalid movement failure reason."
+			)
+
+		var movement_path: Array = raw_path
+		var movement_index: int = raw_index
+		var movement_progress: int = raw_progress
+		var movement_destination: Vector2i = raw_destination
+		var previous_path_tile = null
+		var path_entries_valid := true
+
+		if (
+			movement_progress < 0
+			or movement_progress
+			>= WorldData.CITY_CITIZEN_MOVEMENT_PROGRESS_PER_TILE
+		):
+			errors.append(
+				"Citizen "
+					+ str(citizen_id)
+					+ " has out-of-range movement progress."
+			)
+
+		for path_index in range(movement_path.size()):
+			var raw_path_tile = movement_path[path_index]
+
+			if not raw_path_tile is Vector2i:
+				errors.append(
+					"Citizen "
+						+ str(citizen_id)
+						+ " movement path contains non-Vector2i data."
+				)
+				path_entries_valid = false
+				previous_path_tile = null
+				continue
+
+			var path_tile: Vector2i = raw_path_tile
+
+			if (
+				city_world != null
+				and not city_world.is_in_bounds(
+					path_tile.x,
+					path_tile.y
+				)
+			):
+				errors.append(
+					"Citizen "
+						+ str(citizen_id)
+						+ " movement path leaves city bounds."
+				)
+				path_entries_valid = false
+
+			if previous_path_tile is Vector2i:
+				var cardinal_distance := (
+					absi(path_tile.x - previous_path_tile.x)
+					+ absi(path_tile.y - previous_path_tile.y)
+				)
+
+				if cardinal_distance != 1:
+					errors.append(
+						"Citizen "
+							+ str(citizen_id)
+							+ " movement path contains a non-cardinal step."
+					)
+					path_entries_valid = false
+
+			previous_path_tile = path_tile
+
+		var citizen_is_active := (
+			WorldData.city_active_mover_id_lookup.has(
+				int(citizen_id)
+			)
+		)
+
+		match movement_state:
+			WorldData.CITY_CITIZEN_MOVEMENT_STATE_IDLE:
+				if not movement_path.is_empty():
+					errors.append(
+						"Idle citizen "
+							+ str(citizen_id)
+							+ " retains a movement path."
+					)
+
+				if movement_index != 0 or movement_progress != 0:
+					errors.append(
+						"Idle citizen "
+							+ str(citizen_id)
+							+ " retains movement progress."
+					)
+
+				if (
+					movement_destination
+					!= WorldData.INVALID_CITY_TILE_POSITION
+				):
+					errors.append(
+						"Idle citizen "
+							+ str(citizen_id)
+							+ " retains a movement destination."
+					)
+
+				if (
+					str(raw_failure)
+					!= WorldData.CITY_CITIZEN_MOVEMENT_FAILURE_NONE
+				):
+					errors.append(
+						"Idle citizen "
+							+ str(citizen_id)
+							+ " retains a movement failure reason."
+					)
+
+				if citizen_is_active:
+					errors.append(
+						"Idle citizen "
+							+ str(citizen_id)
+							+ " appears in the active-mover registry."
+					)
+
+			WorldData.CITY_CITIZEN_MOVEMENT_STATE_MOVING:
+				expected_active_ids[int(citizen_id)] = true
+
+				if not bool(citizen.get("alive", false)):
+					errors.append(
+						"Dead citizen "
+							+ str(citizen_id)
+							+ " remains in moving state."
+					)
+
+				if movement_path.size() < 2:
+					errors.append(
+						"Moving citizen "
+							+ str(citizen_id)
+							+ " has an incomplete path."
+					)
+
+				if (
+					movement_index < 1
+					or movement_index >= movement_path.size()
+				):
+					errors.append(
+						"Moving citizen "
+							+ str(citizen_id)
+							+ " has an out-of-range path index."
+					)
+				elif (
+					path_entries_valid
+					and movement_path[movement_index - 1]
+					!= citizen.get(
+						"city_tile_position",
+						WorldData.INVALID_CITY_TILE_POSITION
+					)
+				):
+					errors.append(
+						"Moving citizen "
+							+ str(citizen_id)
+							+ " path anchor disagrees with its position."
+					)
+
+				if (
+					not movement_path.is_empty()
+					and movement_destination
+					!= movement_path.back()
+				):
+					errors.append(
+						"Moving citizen "
+							+ str(citizen_id)
+							+ " destination disagrees with its path."
+					)
+
+				if (
+					str(raw_failure)
+					!= WorldData.CITY_CITIZEN_MOVEMENT_FAILURE_NONE
+				):
+					errors.append(
+						"Moving citizen "
+							+ str(citizen_id)
+							+ " retains a failure reason."
+					)
+
+				if not citizen_is_active:
+					errors.append(
+						"Moving citizen "
+							+ str(citizen_id)
+							+ " is absent from the active-mover registry."
+					)
+
+			WorldData.CITY_CITIZEN_MOVEMENT_STATE_BLOCKED:
+				if citizen_is_active:
+					errors.append(
+						"Blocked citizen "
+							+ str(citizen_id)
+							+ " appears in the active-mover registry."
+					)
+
+	var active_array_lookup: Dictionary = {}
+	var previous_active_id := -1
+
+	for active_citizen_id in WorldData.city_active_mover_ids:
+		if active_array_lookup.has(active_citizen_id):
+			errors.append(
+				"Active-mover registry contains duplicate citizen ID "
+					+ str(active_citizen_id)
+					+ "."
+			)
+		else:
+			active_array_lookup[active_citizen_id] = true
+
+		if (
+			previous_active_id >= 0
+			and active_citizen_id <= previous_active_id
+		):
+			errors.append(
+				"Active-mover registry is not strictly sorted."
+			)
+
+		previous_active_id = active_citizen_id
+
+		if not citizen_lookup.has(active_citizen_id):
+			errors.append(
+				"Active-mover registry references missing citizen "
+					+ str(active_citizen_id)
+					+ "."
+			)
+			continue
+
+		var active_citizen: Dictionary = (
+			WorldData.city_citizens[
+				int(citizen_lookup[active_citizen_id])
+			]
+		)
+
+		if (
+			not bool(active_citizen.get("alive", false))
+			or str(active_citizen.get("movement_state", ""))
+			!= WorldData.CITY_CITIZEN_MOVEMENT_STATE_MOVING
+		):
+			errors.append(
+				"Active-mover registry contains an ineligible citizen."
+			)
+
+		if not WorldData.city_active_mover_id_lookup.has(
+			active_citizen_id
+		):
+			errors.append(
+				"Active-mover lookup is missing citizen "
+					+ str(active_citizen_id)
+					+ "."
+			)
+
+	for lookup_id in WorldData.city_active_mover_id_lookup.keys():
+		if not active_array_lookup.has(lookup_id):
+			errors.append(
+				"Active-mover lookup contains citizen "
+					+ str(lookup_id)
+					+ " absent from its array."
+			)
+
+	for expected_active_id in expected_active_ids.keys():
+		if not active_array_lookup.has(expected_active_id):
+			errors.append(
+				"Moving citizen "
+					+ str(expected_active_id)
+					+ " is absent from the active-mover array."
 			)
 
 static func _validate_city_foundation_state(

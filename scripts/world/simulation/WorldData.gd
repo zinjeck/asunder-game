@@ -1,6 +1,10 @@
 extends RefCounted
 class_name WorldData
 
+const CityCitizensScript = preload(
+	"res://scripts/citizens/simulation/CityCitizens.gd"
+)
+
 const TERRAIN_WATER := "water"
 const TERRAIN_LAND := "land"
 const TERRAIN_MOUNTAIN := "mountain"
@@ -73,6 +77,8 @@ static var next_city_object_id: int = 1
 static var city_citizens: Array = []
 static var city_citizen_index_by_id: Dictionary = {}
 static var city_citizen_ids_by_tile: Dictionary = {}
+static var city_active_mover_ids: Array[int] = []
+static var city_active_mover_id_lookup: Dictionary = {}
 static var next_city_citizen_id: int = 1
 
 # Focused change versions.
@@ -84,103 +90,67 @@ static var city_container_version: int = 0
 static var city_public_storage_version: int = 0
 static var city_citizen_version: int = 0
 static var city_citizen_spatial_version: int = 0
+static var city_citizen_movement_version: int = 0
 static var city_assignment_version: int = 0
 static var city_workplace_version: int = 0
-static var city_citizen_male_name_pool: Array[String] = [
-	"Arlen",
-	"Tovan",
-	"Calen",
-	"Ronan",
-	"Darian",
-	"Kael",
-	"Bren",
-	"Orin",
-	"Levon",
-	"Theron",
-	"Jarek",
-	"Corin",
-	"Malric",
-	"Edrin",
-	"Tomas",
-	"Varon",
-	"Lucan",
-	"Alric",
-	"Fenric",
-	"Soren",
-	"Aldren",
-	"Beran",
-	"Cedran",
-	"Doran",
-	"Evren",
-	"Garric",
-	"Hadren",
-	"Ivarn",
-	"Joren",
-	"Kellan",
-	"Merek",
-	"Nolan",
-	"Odran",
-	"Perric",
-	"Roder",
-	"Stellan",
-	"Torren",
-	"Ulren",
-	"Wystan",
-	"Yorick",
-]
-static var city_citizen_female_name_pool: Array[String] = [
-	"Mira",
-	"Elia",
-	"Sera",
-	"Nira",
-	"Liora",
-	"Kaela",
-	"Maris",
-	"Elara",
-	"Vessa",
-	"Talia",
-	"Rina",
-	"Anya",
-	"Selene",
-	"Maera",
-	"Isolde",
-	"Lyra",
-	"Vela",
-	"Seris",
-	"Amara",
-	"Coralie",
-	"Aveline",
-	"Briala",
-	"Ceryn",
-	"Delara",
-	"Eirwen",
-	"Fiora",
-	"Giselle",
-	"Halia",
-	"Ilara",
-	"Jessamine",
-	"Kerra",
-	"Lenora",
-	"Mirelle",
-	"Nerissa",
-	"Odelle",
-	"Petra",
-	"Roselyn",
-	"Sabine",
-	"Thalia",
-	"Ysara",
-]
-static var city_citizen_unassigned_name_pool: Array[String] = []
+static var city_citizen_male_name_pool: Array[String] = (
+	CityCitizensScript.city_citizen_male_name_pool
+)
+static var city_citizen_female_name_pool: Array[String] = (
+	CityCitizensScript.city_citizen_female_name_pool
+)
+static var city_citizen_unassigned_name_pool: Array[String] = (
+	CityCitizensScript.city_citizen_unassigned_name_pool
+)
+
 const STARTING_CITY_POPULATION := 8
-const CITY_CITIZEN_SEX_MALE := "male"
-const CITY_CITIZEN_SEX_FEMALE := "female"
+const CITY_CITIZEN_SEX_MALE := (
+	CityCitizensScript.CITY_CITIZEN_SEX_MALE
+)
+const CITY_CITIZEN_SEX_FEMALE := (
+	CityCitizensScript.CITY_CITIZEN_SEX_FEMALE
+)
 const STARTING_CITY_MALE_POPULATION: int = 4
 const STARTING_CITY_FEMALE_POPULATION: int = 4
-const DEFAULT_CITIZEN_CARRY_CAPACITY := 10
-const DEFAULT_CITIZEN_HUNGER := 100
-const DEFAULT_CITIZEN_HAPPINESS := 70
-const CITY_CITIZEN_STATE_IDLE := "idle"
-const INVALID_CITY_TILE_POSITION := Vector2i(-1, -1)
+const DEFAULT_CITIZEN_CARRY_CAPACITY := (
+	CityCitizensScript.DEFAULT_CITIZEN_CARRY_CAPACITY
+)
+const DEFAULT_CITIZEN_HUNGER := (
+	CityCitizensScript.DEFAULT_CITIZEN_HUNGER
+)
+const DEFAULT_CITIZEN_HAPPINESS := (
+	CityCitizensScript.DEFAULT_CITIZEN_HAPPINESS
+)
+const CITY_CITIZEN_STATE_IDLE := (
+	CityCitizensScript.CITY_CITIZEN_STATE_IDLE
+)
+const INVALID_CITY_TILE_POSITION := (
+	CityCitizensScript.INVALID_CITY_TILE_POSITION
+)
+const CITY_CITIZEN_MOVEMENT_STATE_IDLE := (
+	CityCitizensScript.CITY_CITIZEN_MOVEMENT_STATE_IDLE
+)
+const CITY_CITIZEN_MOVEMENT_STATE_MOVING := (
+	CityCitizensScript.CITY_CITIZEN_MOVEMENT_STATE_MOVING
+)
+const CITY_CITIZEN_MOVEMENT_STATE_BLOCKED := (
+	CityCitizensScript.CITY_CITIZEN_MOVEMENT_STATE_BLOCKED
+)
+const CITY_CITIZEN_MOVEMENT_FAILURE_NONE := (
+	CityCitizensScript.CITY_CITIZEN_MOVEMENT_FAILURE_NONE
+)
+const CITY_CITIZEN_MOVEMENT_FAILURE_INVALID_PATH := (
+	CityCitizensScript.CITY_CITIZEN_MOVEMENT_FAILURE_INVALID_PATH
+)
+const CITY_CITIZEN_MOVEMENT_FAILURE_NEXT_TILE_BLOCKED := (
+	CityCitizensScript.CITY_CITIZEN_MOVEMENT_FAILURE_NEXT_TILE_BLOCKED
+)
+const CITY_CITIZEN_MOVEMENT_PROGRESS_PER_TILE := (
+	CityCitizensScript.CITY_CITIZEN_MOVEMENT_PROGRESS_PER_TILE
+)
+const DEFAULT_CITIZEN_MOVEMENT_SPEED_PER_MINUTE := (
+	CityCitizensScript.DEFAULT_CITIZEN_MOVEMENT_SPEED_PER_MINUTE
+)
 const CITY_CARDINAL_TILE_OFFSETS := [
 	Vector2i(0, -1),
 	Vector2i(-1, 0),
@@ -1110,6 +1080,9 @@ static func _mark_city_citizens_changed() -> void:
 static func _mark_city_citizen_spatial_changed() -> void:
 	city_citizen_spatial_version += 1
 
+static func _mark_city_citizen_movement_changed() -> void:
+	city_citizen_movement_version += 1
+
 static func _mark_city_assignments_changed() -> void:
 	city_assignment_version += 1
 
@@ -1164,6 +1137,57 @@ static func rebuild_city_citizen_index() -> void:
 			continue
 
 		city_citizen_index_by_id[citizen_id] = citizen_index
+
+static func _add_city_active_mover_id(
+	citizen_id: int
+) -> void:
+	if citizen_id <= 0:
+		return
+
+	if city_active_mover_id_lookup.has(citizen_id):
+		return
+
+	city_active_mover_ids.append(citizen_id)
+	city_active_mover_ids.sort()
+	city_active_mover_id_lookup[citizen_id] = true
+
+
+static func _remove_city_active_mover_id(
+	citizen_id: int
+) -> void:
+	city_active_mover_id_lookup.erase(citizen_id)
+	city_active_mover_ids.erase(citizen_id)
+
+
+static func rebuild_city_active_mover_registry() -> void:
+	city_active_mover_ids.clear()
+	city_active_mover_id_lookup.clear()
+
+	for raw_citizen in city_citizens:
+		if not raw_citizen is Dictionary:
+			continue
+
+		var citizen: Dictionary = raw_citizen
+
+		if not bool(citizen.get("alive", false)):
+			continue
+
+		if (
+			str(citizen.get("movement_state", ""))
+			!= CITY_CITIZEN_MOVEMENT_STATE_MOVING
+		):
+			continue
+
+		var citizen_id := int(citizen.get("id", -1))
+
+		if citizen_id <= 0:
+			continue
+
+		_add_city_active_mover_id(citizen_id)
+
+
+static func get_city_active_mover_ids_snapshot() -> Array[int]:
+	return city_active_mover_ids.duplicate()
 
 static func _add_city_citizen_to_spatial_index(
 	citizen_id: int,
@@ -1310,11 +1334,11 @@ static func has_living_city_citizen_at_tile(
 
 	return false
 
-
 static func rebuild_city_entity_indexes() -> void:
 	rebuild_city_object_index()
 	rebuild_city_citizen_index()
 	rebuild_city_citizen_spatial_index()
+	rebuild_city_active_mover_registry()
 
 static func _register_city_object_index(
 	city_object: Dictionary,
@@ -1491,10 +1515,13 @@ static func reset_city_citizen_state() -> void:
 	city_citizens.clear()
 	city_citizen_index_by_id.clear()
 	city_citizen_ids_by_tile.clear()
+	city_active_mover_ids.clear()
+	city_active_mover_id_lookup.clear()
 	next_city_citizen_id = 1
 
 	_mark_city_citizens_changed()
 	_mark_city_citizen_spatial_changed()
+	_mark_city_citizen_movement_changed()
 	_mark_city_assignments_changed()
 
 static func make_empty_citizen_inventory() -> Dictionary:
@@ -1514,120 +1541,42 @@ static func get_city_citizen_name_seed() -> int:
 static func normalize_city_citizen_sex(
 	citizen_sex: String
 ) -> String:
-	return citizen_sex.strip_edges().to_lower()
+	return CityCitizensScript.normalize_city_citizen_sex(
+		citizen_sex
+	)
 
 
 static func is_valid_city_citizen_sex(
 	citizen_sex: String
 ) -> bool:
-	var normalized_sex := (
-		normalize_city_citizen_sex(
-			citizen_sex
-		)
-	)
-
-	return (
-		normalized_sex
-		== CITY_CITIZEN_SEX_MALE
-		or normalized_sex
-		== CITY_CITIZEN_SEX_FEMALE
+	return CityCitizensScript.is_valid_city_citizen_sex(
+		citizen_sex
 	)
 
 
 static func get_city_citizen_sex_types() -> Array[String]:
-	return [
-		CITY_CITIZEN_SEX_MALE,
-		CITY_CITIZEN_SEX_FEMALE
-	]
+	return CityCitizensScript.get_city_citizen_sex_types()
 
 
 static func get_city_citizen_sex_display_name(
 	citizen_sex: String
 ) -> String:
-	match normalize_city_citizen_sex(
+	return CityCitizensScript.get_city_citizen_sex_display_name(
 		citizen_sex
-	):
-		CITY_CITIZEN_SEX_MALE:
-			return "Male"
-
-		CITY_CITIZEN_SEX_FEMALE:
-			return "Female"
-
-	return "Unknown"
+	)
 
 
 static func get_city_citizen_name_pool_for_sex(
 	citizen_sex: String
 ) -> Array[String]:
-	match normalize_city_citizen_sex(
+	return CityCitizensScript.get_city_citizen_name_pool_for_sex(
 		citizen_sex
-	):
-		CITY_CITIZEN_SEX_MALE:
-			return (
-				city_citizen_male_name_pool
-				.duplicate()
-			)
-
-		CITY_CITIZEN_SEX_FEMALE:
-			return (
-				city_citizen_female_name_pool
-				.duplicate()
-			)
-
-	return []
+	)
 
 
 static func city_citizen_name_pools_are_ready() -> bool:
-	if city_citizen_male_name_pool.is_empty():
-		return false
-
-	if city_citizen_female_name_pool.is_empty():
-		return false
-
-	if not city_citizen_unassigned_name_pool.is_empty():
-		return false
-
-	var used_name_keys: Dictionary = {}
-
-	for raw_name in city_citizen_male_name_pool:
-		var name := str(raw_name)
-		var clean_name := name.strip_edges()
-		var name_key := clean_name.to_lower()
-
-		if clean_name.is_empty():
-			return false
-
-		if clean_name != name:
-			return false
-
-		if used_name_keys.has(name_key):
-			return false
-
-		used_name_keys[name_key] = (
-			CITY_CITIZEN_SEX_MALE
-		)
-
-	for raw_name in city_citizen_female_name_pool:
-		var name := str(raw_name)
-		var clean_name := name.strip_edges()
-		var name_key := clean_name.to_lower()
-
-		if clean_name.is_empty():
-			return false
-
-		if clean_name != name:
-			return false
-
-		if used_name_keys.has(name_key):
-			return false
-
-		used_name_keys[name_key] = (
-			CITY_CITIZEN_SEX_FEMALE
-		)
-
-	return true
-
-
+	return CityCitizensScript.city_citizen_name_pools_are_ready()
+	
 static func get_city_citizen_count_by_sex(
 	citizen_sex: String
 ) -> int:
@@ -1663,111 +1612,27 @@ static func get_city_citizen_count_by_sex(
 	return citizen_count
 
 static func get_used_city_citizen_name_counts() -> Dictionary:
-	var used_name_counts := {}
+	return CityCitizensScript.get_used_city_citizen_name_counts(
+		city_citizens
+	)
 
-	for citizen in city_citizens:
-		if not citizen is Dictionary:
-			continue
-
-		var citizen_name := str(citizen.get("name", "")).strip_edges()
-
-		if citizen_name.is_empty():
-			continue
-
-		used_name_counts[citizen_name] = int(used_name_counts.get(citizen_name, 0)) + 1
-
-	return used_name_counts
 
 static func make_random_city_citizen_first_name(
 	citizen_sex: String,
 	citizen_number: int = -1
 ) -> String:
-	var normalized_sex := (
-		normalize_city_citizen_sex(
-			citizen_sex
-		)
-	)
-
-	if not is_valid_city_citizen_sex(
-		normalized_sex
-	):
-		return ""
-
-	var source_name_pool := (
-		get_city_citizen_name_pool_for_sex(
-			normalized_sex
-		)
-	)
-
-	if source_name_pool.is_empty():
-		return ""
-
-	var used_name_counts := (
-		get_used_city_citizen_name_counts()
-	)
-	var available_names: Array[String] = []
-
-	for raw_name in source_name_pool:
-		var candidate_name := (
-			str(raw_name).strip_edges()
-		)
-
-		if candidate_name.is_empty():
-			continue
-
-		if used_name_counts.has(candidate_name):
-			continue
-
-		available_names.append(candidate_name)
-
-	var candidate_pool: Array[String] = (
-		available_names
-	)
-
-	# Names may repeat after every unique name in the appropriate
-	# pool has been used. Family names can solve this later.
-	if candidate_pool.is_empty():
-		candidate_pool = source_name_pool
-
-	if candidate_pool.is_empty():
-		return ""
-
 	var resolved_citizen_number := citizen_number
 
 	if resolved_citizen_number <= 0:
-		resolved_citizen_number = (
-			next_city_citizen_id
-		)
+		resolved_citizen_number = next_city_citizen_id
 
-	var sex_seed_offset := 0
-
-	if normalized_sex == CITY_CITIZEN_SEX_MALE:
-		sex_seed_offset = 104_729
-	else:
-		sex_seed_offset = 130_363
-
-	var rng := RandomNumberGenerator.new()
-	var seed_value := get_city_citizen_name_seed()
-	var population_number := city_citizens.size()
-
-	rng.seed = int(
-		abs(
-			seed_value * 1_000_003
-			+ resolved_citizen_number * 9_176
-			+ population_number * 6_113
-			+ sex_seed_offset
-			+ 1_337
-		)
+	return CityCitizensScript.make_random_city_citizen_first_name(
+		citizen_sex,
+		resolved_citizen_number,
+		get_city_citizen_name_seed(),
+		city_citizens
 	)
 
-	var random_index := rng.randi_range(
-		0,
-		candidate_pool.size() - 1
-	)
-
-	return str(
-		candidate_pool[random_index]
-	).strip_edges()
 
 static func make_city_citizen(
 	display_name: String = "",
@@ -1776,76 +1641,18 @@ static func make_city_citizen(
 	),
 	citizen_sex: String = ""
 ) -> Dictionary:
-	var normalized_sex := (
-		normalize_city_citizen_sex(
-			citizen_sex
-		)
-	)
-
-	if not is_valid_city_citizen_sex(
-		normalized_sex
-	):
-		push_error(
-			"Cannot create city citizen with invalid sex '"
-			+ citizen_sex
-			+ "'."
-		)
-		return {}
-
-	var citizen_name := display_name.strip_edges()
-
-	if citizen_name.is_empty():
-		citizen_name = (
-			make_random_city_citizen_first_name(
-				normalized_sex,
-				next_city_citizen_id
-			)
-		)
-
-	if citizen_name.is_empty():
-		push_error(
-			"Cannot create "
-			+ normalized_sex
-			+ " citizen because its name pool "
-			+ "contains no usable names."
-		)
-		return {}
-
-	var allowed_name_pool := (
-		get_city_citizen_name_pool_for_sex(
-			normalized_sex
-		)
-	)
-
-	if not allowed_name_pool.has(citizen_name):
-		push_error(
-			"Cannot assign name '"
-			+ citizen_name
-			+ "' to "
-			+ normalized_sex
-			+ " citizen because it is absent "
-			+ "from that sex's name pool."
-		)
-		return {}
-
-	var citizen := {
+	var citizen := CityCitizensScript.make_city_citizen({
 		"id": next_city_citizen_id,
-		"name": citizen_name,
-		"sex": normalized_sex,
-		"alive": true,
-		"hunger": DEFAULT_CITIZEN_HUNGER,
-		"happiness": DEFAULT_CITIZEN_HAPPINESS,
-		"home_object_id": -1,
-		"job_object_id": -1,
-		"state": CITY_CITIZEN_STATE_IDLE,
-		"city_tile_position": (
-			initial_city_tile_position
-		),
-		"carry_capacity": (
-			DEFAULT_CITIZEN_CARRY_CAPACITY
-		),
-		"inventory": make_empty_citizen_inventory()
-	}
+		"display_name": display_name,
+		"sex": citizen_sex,
+		"city_tile_position": initial_city_tile_position,
+		"inventory": make_empty_citizen_inventory(),
+		"name_seed": get_city_citizen_name_seed(),
+		"existing_citizens": city_citizens
+	})
+
+	if citizen.is_empty():
+		return {}
 
 	next_city_citizen_id += 1
 	return citizen
@@ -2088,6 +1895,59 @@ static func ensure_city_citizen_demographic_state() -> int:
 
 	return migrated_count
 
+static func is_valid_city_citizen_movement_state(
+	movement_state: String
+) -> bool:
+	return CityCitizensScript.is_valid_city_citizen_movement_state(
+		movement_state
+	)
+
+
+static func is_valid_city_citizen_movement_failure(
+	failure_reason: String
+) -> bool:
+	return CityCitizensScript.is_valid_city_citizen_movement_failure(
+		failure_reason
+	)
+
+
+static func ensure_city_citizen_movement_state() -> int:
+	if city_citizens.is_empty():
+		city_active_mover_ids.clear()
+		city_active_mover_id_lookup.clear()
+		return 0
+
+	var migrated_count := 0
+
+	for citizen_index in range(city_citizens.size()):
+		var raw_citizen = city_citizens[citizen_index]
+
+		if not raw_citizen is Dictionary:
+			continue
+
+		var citizen: Dictionary = raw_citizen
+
+		if (
+			CityCitizensScript
+			.has_complete_city_citizen_movement_state(
+				citizen
+			)
+		):
+			continue
+
+		CityCitizensScript.reset_city_citizen_movement_state(
+			citizen
+		)
+		city_citizens[citizen_index] = citizen
+		migrated_count += 1
+
+	rebuild_city_active_mover_registry()
+
+	if migrated_count > 0:
+		_mark_city_citizen_movement_changed()
+
+	return migrated_count
+
 static func ensure_city_citizen_spatial_state(
 	city_world: WorldData
 ) -> int:
@@ -2245,6 +2105,352 @@ static func set_city_citizen_tile_position(
 	_mark_city_citizen_spatial_changed()
 
 	return true
+
+static func _get_clean_city_citizen_movement_path(
+	city_world: WorldData,
+	raw_path: Array
+) -> Array:
+	var movement_path := []
+
+	if city_world == null:
+		return movement_path
+
+	if raw_path.is_empty():
+		return movement_path
+
+	var previous_tile := INVALID_CITY_TILE_POSITION
+
+	for raw_path_tile in raw_path:
+		if not raw_path_tile is Vector2i:
+			return []
+
+		var path_tile: Vector2i = raw_path_tile
+
+		if not is_city_tile_walkable_for_citizen(
+			city_world,
+			path_tile
+		):
+			return []
+
+		if previous_tile != INVALID_CITY_TILE_POSITION:
+			var cardinal_distance := (
+				absi(path_tile.x - previous_tile.x)
+				+ absi(path_tile.y - previous_tile.y)
+			)
+
+			if cardinal_distance != 1:
+				return []
+
+		movement_path.append(path_tile)
+		previous_tile = path_tile
+
+	return movement_path
+
+
+static func cancel_city_citizen_movement(
+	citizen_id: int
+) -> bool:
+	var citizen_index := get_city_citizen_index_by_id(
+		citizen_id
+	)
+
+	if citizen_index < 0:
+		return false
+
+	var raw_citizen = city_citizens[citizen_index]
+
+	if not raw_citizen is Dictionary:
+		return false
+
+	var citizen: Dictionary = raw_citizen
+
+	CityCitizensScript.reset_city_citizen_movement_state(
+		citizen,
+		true
+	)
+	city_citizens[citizen_index] = citizen
+
+	_remove_city_active_mover_id(citizen_id)
+	_mark_city_citizen_movement_changed()
+
+	return true
+
+
+static func assign_city_citizen_movement_order(
+	citizen_id: int,
+	raw_path: Array
+) -> bool:
+	var city_world: WorldData = official_city_world
+
+	if city_world == null:
+		return false
+
+	var citizen_index := get_city_citizen_index_by_id(
+		citizen_id
+	)
+
+	if citizen_index < 0:
+		return false
+
+	var raw_citizen = city_citizens[citizen_index]
+
+	if not raw_citizen is Dictionary:
+		return false
+
+	var citizen: Dictionary = raw_citizen
+
+	if not bool(citizen.get("alive", false)):
+		return false
+
+	var current_position = citizen.get(
+		"city_tile_position",
+		INVALID_CITY_TILE_POSITION
+	)
+
+	if not current_position is Vector2i:
+		return false
+
+	var movement_path := _get_clean_city_citizen_movement_path(
+		city_world,
+		raw_path
+	)
+
+	if movement_path.is_empty():
+		return false
+
+	if movement_path[0] != current_position:
+		return false
+
+	if movement_path.size() == 1:
+		cancel_city_citizen_movement(citizen_id)
+		return true
+
+	var movement_speed := int(
+		citizen.get(
+			"movement_speed_basis_points_per_minute",
+			DEFAULT_CITIZEN_MOVEMENT_SPEED_PER_MINUTE
+		)
+	)
+
+	if movement_speed <= 0:
+		movement_speed = (
+			DEFAULT_CITIZEN_MOVEMENT_SPEED_PER_MINUTE
+		)
+
+	citizen["movement_state"] = (
+		CITY_CITIZEN_MOVEMENT_STATE_MOVING
+	)
+	citizen["movement_path"] = movement_path.duplicate()
+	citizen["movement_path_index"] = 1
+	citizen["movement_progress_basis_points"] = 0
+	citizen["movement_destination_tile"] = (
+		movement_path.back()
+	)
+	citizen["movement_speed_basis_points_per_minute"] = (
+		movement_speed
+	)
+	citizen["movement_failure_reason"] = (
+		CITY_CITIZEN_MOVEMENT_FAILURE_NONE
+	)
+
+	city_citizens[citizen_index] = citizen
+
+	_add_city_active_mover_id(citizen_id)
+	_mark_city_citizen_movement_changed()
+
+	return true
+
+static func commit_city_citizen_movement_tick(
+	city_world: WorldData,
+	raw_citizen_updates: Array,
+	raw_next_active_mover_ids: Array[int]
+) -> Dictionary:
+	var result := {
+		"success": false,
+		"updated_citizen_count": 0,
+		"moved_citizen_count": 0
+	}
+
+	if city_world == null:
+		return result
+
+	var clean_updates: Array = []
+	var clean_update_by_id: Dictionary = {}
+
+	for raw_update in raw_citizen_updates:
+		if not raw_update is Dictionary:
+			return result
+
+		var update: Dictionary = raw_update
+		var citizen_id := int(
+			update.get("citizen_id", -1)
+		)
+		var raw_updated_citizen = update.get(
+			"citizen",
+			{}
+		)
+		var raw_final_tile = update.get(
+			"final_tile",
+			INVALID_CITY_TILE_POSITION
+		)
+
+		if citizen_id <= 0:
+			return result
+
+		if clean_update_by_id.has(citizen_id):
+			return result
+
+		if not raw_updated_citizen is Dictionary:
+			return result
+
+		if not raw_final_tile is Vector2i:
+			return result
+
+		if not is_city_tile_walkable_for_citizen(
+			city_world,
+			raw_final_tile
+		):
+			return result
+
+		var citizen_index := get_city_citizen_index_by_id(
+			citizen_id
+		)
+
+		if citizen_index < 0:
+			return result
+
+		var updated_citizen: Dictionary = (
+			raw_updated_citizen
+		)
+
+		if int(updated_citizen.get("id", -1)) != citizen_id:
+			return result
+
+		var existing_citizen = city_citizens[citizen_index]
+
+		if not existing_citizen is Dictionary:
+			return result
+
+		if not (
+			existing_citizen.get(
+				"city_tile_position",
+				INVALID_CITY_TILE_POSITION
+			)
+			is Vector2i
+		):
+			return result
+
+		var clean_update := {
+			"citizen_id": citizen_id,
+			"citizen_index": citizen_index,
+			"citizen": updated_citizen,
+			"final_tile": raw_final_tile
+		}
+
+		clean_updates.append(clean_update)
+		clean_update_by_id[citizen_id] = clean_update
+
+	var clean_next_active_ids: Array[int] = []
+	var clean_next_active_lookup: Dictionary = {}
+
+	for citizen_id in raw_next_active_mover_ids:
+		if citizen_id <= 0:
+			return result
+
+		if clean_next_active_lookup.has(citizen_id):
+			return result
+
+		var proposed_citizen := get_city_citizen_by_id(
+			citizen_id
+		)
+
+		if clean_update_by_id.has(citizen_id):
+			var proposed_update: Dictionary = (
+				clean_update_by_id[citizen_id]
+			)
+			proposed_citizen = proposed_update.get(
+				"citizen",
+				{}
+			)
+
+		if proposed_citizen.is_empty():
+			return result
+
+		if not bool(proposed_citizen.get("alive", false)):
+			return result
+
+		if (
+			str(proposed_citizen.get("movement_state", ""))
+			!= CITY_CITIZEN_MOVEMENT_STATE_MOVING
+		):
+			return result
+
+		clean_next_active_ids.append(citizen_id)
+		clean_next_active_lookup[citizen_id] = true
+
+	clean_next_active_ids.sort()
+
+	var moved_citizen_count := 0
+
+	for clean_update in clean_updates:
+		var citizen_id := int(
+			clean_update.get("citizen_id", -1)
+		)
+		var citizen_index := int(
+			clean_update.get("citizen_index", -1)
+		)
+		var updated_citizen: Dictionary = (
+			clean_update.get("citizen", {})
+		)
+		var final_tile: Vector2i = clean_update.get(
+			"final_tile",
+			INVALID_CITY_TILE_POSITION
+		)
+		var existing_citizen: Dictionary = (
+			city_citizens[citizen_index]
+		)
+		var old_tile: Vector2i = existing_citizen.get(
+			"city_tile_position",
+			INVALID_CITY_TILE_POSITION
+		)
+
+		if old_tile != final_tile:
+			_remove_city_citizen_from_spatial_index(
+				citizen_id,
+				old_tile
+			)
+			moved_citizen_count += 1
+
+		updated_citizen["city_tile_position"] = final_tile
+		city_citizens[citizen_index] = updated_citizen
+
+		_add_city_citizen_to_spatial_index(
+			citizen_id,
+			final_tile
+		)
+
+	var active_registry_changed := (
+		city_active_mover_ids != clean_next_active_ids
+	)
+
+	city_active_mover_ids.clear()
+	city_active_mover_id_lookup.clear()
+
+	for citizen_id in clean_next_active_ids:
+		city_active_mover_ids.append(citizen_id)
+		city_active_mover_id_lookup[citizen_id] = true
+
+	if not clean_updates.is_empty() or active_registry_changed:
+		_mark_city_citizen_movement_changed()
+
+	if moved_citizen_count > 0:
+		_mark_city_citizen_spatial_changed()
+
+	result["success"] = true
+	result["updated_citizen_count"] = clean_updates.size()
+	result["moved_citizen_count"] = moved_citizen_count
+
+	return result
 
 static func get_city_population_count() -> int:
 	return city_citizens.size()
@@ -3411,6 +3617,11 @@ static func run_simulation_tick(
 	minutes_advanced: int
 ) -> void:
 	# Simulation systems run here in deterministic order.
+	CitizenMovementSystem.run_tick(
+		tick_index,
+		minutes_advanced
+	)
+
 	WorkplaceProductionSystem.run_tick(
 		tick_index,
 		minutes_advanced

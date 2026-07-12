@@ -7,6 +7,9 @@ const CityStateValidator = preload(
 const CityNavigationSystemScript = preload(
 	"res://scripts/city/simulation/systems/CityNavigationSystem.gd"
 )
+const CityCitizenMovementPresentationScript = preload(
+	"res://scripts/citizens/rendering/CityCitizenMovementPresentation.gd"
+)
 @export_file("*.tscn") var world_scene_path: String = ""
 @export var local_tiles_per_world_tile: int = 64
 @export var city_tile_size: int = 2
@@ -120,6 +123,10 @@ var observed_city_container_version: int = -1
 var observed_city_public_storage_version: int = -1
 var observed_city_citizen_version: int = -1
 var observed_city_citizen_spatial_version: int = -1
+var observed_city_citizen_movement_version: int = -1
+var city_citizen_movement_presentation = (
+	CityCitizenMovementPresentationScript.new()
+)
 var observed_city_assignment_version: int = -1
 var observed_city_workplace_version: int = -1
 var observed_city_tile_data_version: int = -1
@@ -196,6 +203,8 @@ func _ready() -> void:
 		city_world
 	)
 	WorldData.ensure_city_citizen_demographic_state()
+	WorldData.ensure_city_citizen_movement_state()
+	city_citizen_movement_presentation.initialize()
 	rebuild_city_terrain_texture()
 	create_city_camera()
 	create_city_ui()
@@ -206,7 +215,7 @@ func _ready() -> void:
 	queue_redraw()
 
 
-func _process(_delta: float) -> void:
+func _process(delta: float) -> void:
 	var current_hovered_tile := (
 		get_city_tile_under_mouse()
 	)
@@ -241,6 +250,7 @@ func _process(_delta: float) -> void:
 	var public_storage_changed := false
 	var city_citizens_changed := false
 	var city_citizen_spatial_changed := false
+	var city_citizen_movement_changed := false
 	var city_assignments_changed := false
 	var city_workplaces_changed := false
 	var city_tile_data_changed := false
@@ -292,6 +302,15 @@ func _process(_delta: float) -> void:
 		city_citizen_spatial_changed = true
 
 	if (
+		observed_city_citizen_movement_version
+		!= WorldData.city_citizen_movement_version
+	):
+		observed_city_citizen_movement_version = (
+			WorldData.city_citizen_movement_version
+		)
+		city_citizen_movement_changed = true
+
+	if (
 		observed_city_assignment_version
 		!= WorldData.city_assignment_version
 	):
@@ -309,6 +328,23 @@ func _process(_delta: float) -> void:
 		)
 		city_workplaces_changed = true
 
+	if city_citizens_changed or city_citizen_spatial_changed:
+		if (
+			city_citizen_spatial_changed
+			and city_citizen_movement_changed
+		):
+			city_citizen_movement_presentation.synchronize(true)
+		else:
+			# Non-movement position edits are teleports. Refresh any
+			# tracked mover without animating from a stale tile.
+			city_citizen_movement_presentation.synchronize(false)
+
+	if city_citizen_movement_changed:
+		city_citizen_movement_presentation.refresh_mover_tracking()
+
+	if city_citizen_movement_presentation.update(delta):
+		queue_redraw()
+
 	if (
 		has_active_city_object_placement()
 		and (
@@ -325,6 +361,7 @@ func _process(_delta: float) -> void:
 		city_objects_changed
 		or city_containers_changed
 		or city_citizens_changed
+		or city_citizen_movement_changed
 		or city_assignments_changed
 		or city_workplaces_changed
 		or city_tile_data_changed
@@ -344,17 +381,24 @@ func _process(_delta: float) -> void:
 		or city_citizens_changed
 		or city_assignments_changed
 		or city_tile_data_changed
+		or city_citizen_movement_changed
 	):
 		update_debug_panel_text()
 
 	if (
-		city_citizen_spatial_changed
+		(
+			city_citizen_spatial_changed
+			or city_citizen_movement_changed
+		)
 		and WorldData.debug_mode_enabled
 	):
 		update_citizen_debug_ui()
 
 	if (
-		city_citizen_spatial_changed
+		(
+			city_citizen_spatial_changed
+			or city_citizen_movement_changed
+		)
 		and selected_city_entity_kind
 		== CITY_SELECTION_KIND_CITIZEN
 	):
@@ -382,6 +426,14 @@ func _input(event: InputEvent) -> void:
 				or key_event.physical_keycode == KEY_P
 			):
 				request_debug_navigation_path()
+				get_viewport().set_input_as_handled()
+				return
+
+			if (
+				key_event.keycode == KEY_M
+				or key_event.physical_keycode == KEY_M
+			):
+				assign_debug_navigation_path_to_selected_citizen()
 				get_viewport().set_input_as_handled()
 				return
 
@@ -1868,6 +1920,28 @@ func update_selected_city_citizen_panel() -> void:
 	).capitalize()
 
 	object_info_title_label.text = citizen_name
+	var movement_state_text := str(
+		citizen.get(
+			"movement_state",
+			WorldData.CITY_CITIZEN_MOVEMENT_STATE_IDLE
+		)
+	)
+
+	var movement_text := movement_state_text.capitalize()
+
+	if (
+		movement_state_text
+		== WorldData.CITY_CITIZEN_MOVEMENT_STATE_MOVING
+	):
+		movement_text += (
+			" -> "
+			+ str(
+				citizen.get(
+					"movement_destination_tile",
+					WorldData.INVALID_CITY_TILE_POSITION
+				)
+			)
+		)
 
 	var body_lines := [
 		"Citizen #" + str(citizen_id),
@@ -1877,6 +1951,7 @@ func update_selected_city_citizen_panel() -> void:
 			),
 		"Position: " + position_text,
 		"State: " + state_text,
+		"Movement: " + movement_text,
 		"Home: "
 			+ get_citizen_debug_home_text(
 				citizen
@@ -2633,6 +2708,7 @@ func get_selectable_city_citizen_ids_at_world_point(
 	world_position: Vector2
 ) -> Array:
 	var selectable_citizen_ids := []
+	var candidate_citizen_id_lookup: Dictionary = {}
 
 	for raw_citizen_id in (
 		WorldData.get_city_citizen_ids_at_tile(
@@ -2642,7 +2718,26 @@ func get_selectable_city_citizen_ids_at_world_point(
 		if typeof(raw_citizen_id) != TYPE_INT:
 			continue
 
-		var citizen_id: int = raw_citizen_id
+		candidate_citizen_id_lookup[raw_citizen_id] = true
+
+	# Authoritative tile buckets remain the simulation truth. Citizens with
+	# active cosmetic transitions are also considered so clicking follows the
+	# marker that the player can actually see between tiles.
+	for raw_citizen_id in (
+		city_citizen_movement_presentation.get_transitioning_citizen_ids_snapshot()
+	):
+		if typeof(raw_citizen_id) != TYPE_INT:
+			continue
+
+		candidate_citizen_id_lookup[raw_citizen_id] = true
+
+	var candidate_citizen_ids: Array = (
+		candidate_citizen_id_lookup.keys()
+	)
+	candidate_citizen_ids.sort()
+
+	for raw_citizen_id in candidate_citizen_ids:
+		var citizen_id := int(raw_citizen_id)
 		var citizen := (
 			WorldData.get_city_citizen_by_id(
 				citizen_id
@@ -3180,6 +3275,12 @@ func get_city_citizen_world_rect(
 	):
 		return Rect2()
 
+	var visual_tile_position: Vector2 = (
+		city_citizen_movement_presentation.get_visual_tile_position(
+			citizen
+		)
+	)
+
 	var marker_side_length := (
 		float(city_tile_size)
 		* CITY_CITIZEN_MARKER_TILE_SCALE
@@ -3190,12 +3291,12 @@ func get_city_citizen_world_rect(
 	)
 	var tile_center := Vector2(
 		(
-			float(city_tile_position.x)
+			visual_tile_position.x
 			+ 0.5
 		)
 		* float(city_tile_size),
 		(
-			float(city_tile_position.y)
+			visual_tile_position.y
 			+ 0.5
 		)
 		* float(city_tile_size)
@@ -5254,6 +5355,74 @@ func request_debug_navigation_path() -> void:
 	update_debug_panel_text()
 	queue_redraw()
 
+func assign_debug_navigation_path_to_selected_citizen() -> void:
+	if selected_city_citizen_id < 0:
+		print("Movement rejected: select a citizen first.")
+		return
+
+	if (
+		debug_navigation_status
+		!= CityNavigationSystemScript.PATH_STATUS_SUCCESS
+		or debug_navigation_path.is_empty()
+	):
+		print("Movement rejected: press P to create a valid path.")
+		return
+
+	var citizen := WorldData.get_city_citizen_by_id(
+		selected_city_citizen_id
+	)
+
+	if citizen.is_empty():
+		print("Movement rejected: selected citizen is missing.")
+		return
+
+	if not bool(citizen.get("alive", false)):
+		print("Movement rejected: selected citizen is not alive.")
+		return
+
+	var current_position = citizen.get(
+		"city_tile_position",
+		WorldData.INVALID_CITY_TILE_POSITION
+	)
+
+	if not current_position is Vector2i:
+		print("Movement rejected: citizen position is invalid.")
+		return
+
+	if (
+		debug_navigation_start_tile != current_position
+		or debug_navigation_path[0] != current_position
+	):
+		print("Movement rejected: path is stale. Press P again.")
+		return
+
+	if not WorldData.assign_city_citizen_movement_order(
+		selected_city_citizen_id,
+		debug_navigation_path
+	):
+		print(
+			"Movement rejected: authoritative path validation failed."
+		)
+		return
+
+	city_citizen_movement_presentation.track_mover(
+		selected_city_citizen_id
+	)
+
+	update_selected_entity_panel()
+	update_citizen_debug_ui()
+	update_debug_panel_text()
+
+	CityStateValidator.validate(true, true)
+
+	print(
+		"Movement order assigned to citizen #",
+		selected_city_citizen_id,
+		" | Steps: ",
+		maxi(debug_navigation_path.size() - 1, 0),
+		" | Active movers: ",
+		WorldData.city_active_mover_ids
+	)
 
 func get_navigation_debug_text() -> String:
 	if (

@@ -1,7 +1,7 @@
 extends RefCounted
 class_name DevCityLauncher
 
-const DEV_WORLD_SEED: int = 123456789
+const DEV_WORLD_SEED: int = 223456789
 const DEV_REGION_SIZE: int = 9
 const DEV_REGION_OCEAN_RATIO_LIMIT: float = 0.90
 
