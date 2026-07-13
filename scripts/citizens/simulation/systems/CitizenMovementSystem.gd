@@ -1,6 +1,12 @@
 extends RefCounted
 class_name CitizenMovementSystem
 
+const CityNavigationSystemScript = preload(
+	"res://scripts/city/simulation/systems/CityNavigationSystem.gd"
+)
+
+const MAX_REPATH_REQUESTS_PER_TICK: int = 4
+const MAX_REPATH_EXPANDED_NODES: int = 10_000
 
 static func run_tick(
 	_tick_index: int,
@@ -23,6 +29,9 @@ static func run_tick(
 
 	var citizen_updates: Array = []
 	var next_active_mover_ids: Array[int] = []
+	var repath_requests_remaining: int = (
+		MAX_REPATH_REQUESTS_PER_TICK
+	)
 
 	for citizen_id in active_mover_ids:
 		var citizen_index := (
@@ -89,6 +98,10 @@ static func run_tick(
 			"movement_speed_basis_points_per_minute",
 			WorldData.DEFAULT_CITIZEN_MOVEMENT_SPEED_PER_MINUTE
 		)
+		var raw_repath_attempt_count = citizen.get(
+			"movement_repath_attempt_count",
+			0
+		)
 		var raw_destination = citizen.get(
 			"movement_destination_tile",
 			WorldData.INVALID_CITY_TILE_POSITION
@@ -99,6 +112,7 @@ static func run_tick(
 			and typeof(raw_path_index) == TYPE_INT
 			and typeof(raw_progress) == TYPE_INT
 			and typeof(raw_speed) == TYPE_INT
+			and typeof(raw_repath_attempt_count) == TYPE_INT
 			and raw_destination is Vector2i
 		)
 
@@ -119,6 +133,9 @@ static func run_tick(
 		var movement_path_index: int = raw_path_index
 		var movement_progress: int = raw_progress
 		var movement_speed: int = raw_speed
+		var repath_attempt_count: int = (
+			raw_repath_attempt_count
+		)
 		var movement_destination: Vector2i = raw_destination
 
 		var path_state_is_valid: bool = (
@@ -129,6 +146,9 @@ static func run_tick(
 			and movement_progress
 			< WorldData.CITY_CITIZEN_MOVEMENT_PROGRESS_PER_TILE
 			and movement_speed > 0
+			and repath_attempt_count >= 0
+			and repath_attempt_count
+			<= WorldData.MAX_CITIZEN_MOVEMENT_REPATH_ATTEMPTS
 			and movement_path[
 				movement_path_index - 1
 			] == current_tile
@@ -152,6 +172,7 @@ static func run_tick(
 			minutes_advanced * movement_speed
 		)
 		var movement_was_blocked := false
+		var movement_repath_was_deferred := false
 
 		while (
 			movement_progress
@@ -190,20 +211,75 @@ static func run_tick(
 				city_world,
 				next_tile
 			):
-				_set_citizen_movement_blocked(
-					citizen,
-					movement_destination,
-					WorldData.CITY_CITIZEN_MOVEMENT_FAILURE_NEXT_TILE_BLOCKED
+				if (
+					repath_attempt_count
+					>= WorldData.MAX_CITIZEN_MOVEMENT_REPATH_ATTEMPTS
+				):
+					_set_citizen_movement_blocked(
+						citizen,
+						movement_destination,
+						WorldData.CITY_CITIZEN_MOVEMENT_FAILURE_REPATH_FAILED
+					)
+					movement_was_blocked = true
+					break
+
+				if repath_requests_remaining <= 0:
+					movement_progress = 0
+					movement_repath_was_deferred = true
+					break
+
+				repath_requests_remaining -= 1
+				repath_attempt_count += 1
+				citizen["movement_repath_attempt_count"] = (
+					repath_attempt_count
 				)
-				movement_was_blocked = true
-				break
+
+				var repath_path := _find_bounded_repath(
+					city_world,
+					current_tile,
+					movement_destination
+				)
+
+				if repath_path.is_empty():
+					_set_citizen_movement_blocked(
+						citizen,
+						movement_destination,
+						WorldData.CITY_CITIZEN_MOVEMENT_FAILURE_REPATH_FAILED
+					)
+					movement_was_blocked = true
+					break
+
+				movement_path = repath_path
+				movement_path_index = 1
+
+				if movement_path.size() == 1:
+					break
+
+				continue
 
 			movement_progress -= (
 				WorldData.CITY_CITIZEN_MOVEMENT_PROGRESS_PER_TILE
 			)
 			current_tile = next_tile
 			movement_path_index += 1
-
+		if movement_repath_was_deferred:
+			citizen["movement_path"] = movement_path.duplicate()
+			citizen["movement_path_index"] = movement_path_index
+			citizen["movement_progress_basis_points"] = 0
+			citizen["movement_repath_attempt_count"] = (
+				repath_attempt_count
+			)
+			citizen["movement_failure_reason"] = (
+				WorldData.CITY_CITIZEN_MOVEMENT_FAILURE_NONE
+			)
+			next_active_mover_ids.append(citizen_id)
+			_append_citizen_update(
+				citizen_updates,
+				citizen_id,
+				citizen,
+				current_tile
+			)
+			continue
 		if movement_was_blocked:
 			_append_citizen_update(
 				citizen_updates,
@@ -226,9 +302,13 @@ static func run_tick(
 			)
 			continue
 
+		citizen["movement_path"] = movement_path.duplicate()
 		citizen["movement_path_index"] = movement_path_index
 		citizen["movement_progress_basis_points"] = (
 			movement_progress
+		)
+		citizen["movement_repath_attempt_count"] = (
+			repath_attempt_count
 		)
 		citizen["movement_failure_reason"] = (
 			WorldData.CITY_CITIZEN_MOVEMENT_FAILURE_NONE
@@ -255,6 +335,40 @@ static func run_tick(
 			"Citizen movement tick could not be committed."
 		)
 
+static func _find_bounded_repath(
+	city_world: WorldData,
+	start_tile: Vector2i,
+	destination_tile: Vector2i
+) -> Array:
+	var result := (
+		CityNavigationSystemScript.find_path_to_any_city_tile(
+			city_world,
+			start_tile,
+			[destination_tile],
+			MAX_REPATH_EXPANDED_NODES
+		)
+	)
+
+	if not bool(result.get("success", false)):
+		return []
+
+	var raw_path = result.get("path", [])
+
+	if not raw_path is Array:
+		return []
+
+	var repath_path: Array = raw_path
+
+	if repath_path.is_empty():
+		return []
+
+	if repath_path[0] != start_tile:
+		return []
+
+	if repath_path.back() != destination_tile:
+		return []
+
+	return repath_path.duplicate()
 
 static func _append_citizen_update(
 	citizen_updates: Array,
@@ -296,6 +410,19 @@ static func _set_citizen_movement_blocked(
 	destination_tile: Vector2i,
 	failure_reason: String
 ) -> void:
+	var raw_repath_attempt_count = citizen.get(
+		"movement_repath_attempt_count",
+		0
+	)
+	var repath_attempt_count: int = 0
+
+	if typeof(raw_repath_attempt_count) == TYPE_INT:
+		repath_attempt_count = clampi(
+			int(raw_repath_attempt_count),
+			0,
+			WorldData.MAX_CITIZEN_MOVEMENT_REPATH_ATTEMPTS
+		)
+
 	citizen["movement_state"] = (
 		WorldData.CITY_CITIZEN_MOVEMENT_STATE_BLOCKED
 	)
@@ -303,4 +430,7 @@ static func _set_citizen_movement_blocked(
 	citizen["movement_path_index"] = 0
 	citizen["movement_progress_basis_points"] = 0
 	citizen["movement_destination_tile"] = destination_tile
+	citizen["movement_repath_attempt_count"] = (
+		repath_attempt_count
+	)
 	citizen["movement_failure_reason"] = failure_reason

@@ -962,6 +962,7 @@ static func _validate_city_citizen_movement_state(
 		"movement_progress_basis_points",
 		"movement_destination_tile",
 		"movement_speed_basis_points_per_minute",
+		"movement_repath_attempt_count",
 		"movement_failure_reason"
 	]
 
@@ -1001,6 +1002,9 @@ static func _validate_city_citizen_movement_state(
 		)
 		var raw_speed = citizen.get(
 			"movement_speed_basis_points_per_minute"
+		)
+		var raw_repath_attempt_count = citizen.get(
+			"movement_repath_attempt_count"
 		)
 		var raw_failure = citizen.get(
 			"movement_failure_reason"
@@ -1068,6 +1072,14 @@ static func _validate_city_citizen_movement_state(
 			)
 			continue
 
+		if typeof(raw_repath_attempt_count) != TYPE_INT:
+			errors.append(
+				"Citizen "
+					+ str(citizen_id)
+					+ " has non-integer movement repath attempt count."
+			)
+			continue
+
 		if typeof(raw_failure) != TYPE_STRING:
 			errors.append(
 				"Citizen "
@@ -1089,6 +1101,9 @@ static func _validate_city_citizen_movement_state(
 		var movement_index: int = raw_index
 		var movement_progress: int = raw_progress
 		var movement_destination: Vector2i = raw_destination
+		var movement_repath_attempt_count: int = (
+			raw_repath_attempt_count
+		)
 		var previous_path_tile = null
 		var path_entries_valid := true
 
@@ -1102,7 +1117,16 @@ static func _validate_city_citizen_movement_state(
 					+ str(citizen_id)
 					+ " has out-of-range movement progress."
 			)
-
+		if (
+			movement_repath_attempt_count < 0
+			or movement_repath_attempt_count
+			> WorldData.MAX_CITIZEN_MOVEMENT_REPATH_ATTEMPTS
+		):
+			errors.append(
+				"Citizen "
+					+ str(citizen_id)
+					+ " has out-of-range movement repath attempts."
+			)
 		for path_index in range(movement_path.size()):
 			var raw_path_tile = movement_path[path_index]
 
@@ -1189,7 +1213,12 @@ static func _validate_city_citizen_movement_state(
 							+ str(citizen_id)
 							+ " retains a movement failure reason."
 					)
-
+				if movement_repath_attempt_count != 0:
+					errors.append(
+						"Idle citizen "
+							+ str(citizen_id)
+							+ " retains movement repath attempts."
+					)
 				if citizen_is_active:
 					errors.append(
 						"Idle citizen "

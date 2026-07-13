@@ -145,11 +145,17 @@ const CITY_CITIZEN_MOVEMENT_FAILURE_INVALID_PATH := (
 const CITY_CITIZEN_MOVEMENT_FAILURE_NEXT_TILE_BLOCKED := (
 	CityCitizensScript.CITY_CITIZEN_MOVEMENT_FAILURE_NEXT_TILE_BLOCKED
 )
+const CITY_CITIZEN_MOVEMENT_FAILURE_REPATH_FAILED := (
+	CityCitizensScript.CITY_CITIZEN_MOVEMENT_FAILURE_REPATH_FAILED
+)
 const CITY_CITIZEN_MOVEMENT_PROGRESS_PER_TILE := (
 	CityCitizensScript.CITY_CITIZEN_MOVEMENT_PROGRESS_PER_TILE
 )
 const DEFAULT_CITIZEN_MOVEMENT_SPEED_PER_MINUTE := (
 	CityCitizensScript.DEFAULT_CITIZEN_MOVEMENT_SPEED_PER_MINUTE
+)
+const MAX_CITIZEN_MOVEMENT_REPATH_ATTEMPTS := (
+	CityCitizensScript.MAX_CITIZEN_MOVEMENT_REPATH_ATTEMPTS
 )
 const CITY_CARDINAL_TILE_OFFSETS := [
 	Vector2i(0, -1),
@@ -2249,6 +2255,7 @@ static func assign_city_citizen_movement_order(
 	citizen["movement_speed_basis_points_per_minute"] = (
 		movement_speed
 	)
+	citizen["movement_repath_attempt_count"] = 0
 	citizen["movement_failure_reason"] = (
 		CITY_CITIZEN_MOVEMENT_FAILURE_NONE
 	)

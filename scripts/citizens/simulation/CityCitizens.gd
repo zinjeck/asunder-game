@@ -25,9 +25,13 @@ const CITY_CITIZEN_MOVEMENT_FAILURE_INVALID_PATH := "invalid_path"
 const CITY_CITIZEN_MOVEMENT_FAILURE_NEXT_TILE_BLOCKED := (
 	"next_tile_blocked"
 )
+const CITY_CITIZEN_MOVEMENT_FAILURE_REPATH_FAILED := (
+	"repath_failed"
+)
 
 const CITY_CITIZEN_MOVEMENT_PROGRESS_PER_TILE := 10_000
-const DEFAULT_CITIZEN_MOVEMENT_SPEED_PER_MINUTE := 1_000
+const DEFAULT_CITIZEN_MOVEMENT_SPEED_PER_MINUTE := 2_000
+const MAX_CITIZEN_MOVEMENT_REPATH_ATTEMPTS := 3
 
 static var city_citizen_male_name_pool: Array[String] = [
 	"Arlen",
@@ -135,7 +139,8 @@ static func get_city_citizen_movement_failure_types() -> Array[String]:
 	return [
 		CITY_CITIZEN_MOVEMENT_FAILURE_NONE,
 		CITY_CITIZEN_MOVEMENT_FAILURE_INVALID_PATH,
-		CITY_CITIZEN_MOVEMENT_FAILURE_NEXT_TILE_BLOCKED
+		CITY_CITIZEN_MOVEMENT_FAILURE_NEXT_TILE_BLOCKED,
+		CITY_CITIZEN_MOVEMENT_FAILURE_REPATH_FAILED
 	]
 
 
@@ -157,6 +162,7 @@ static func has_complete_city_citizen_movement_state(
 		and citizen.has("movement_progress_basis_points")
 		and citizen.has("movement_destination_tile")
 		and citizen.has("movement_speed_basis_points_per_minute")
+		and citizen.has("movement_repath_attempt_count")
 		and citizen.has("movement_failure_reason")
 	)
 
@@ -192,6 +198,7 @@ static func reset_city_citizen_movement_state(
 	citizen["movement_speed_basis_points_per_minute"] = (
 		movement_speed
 	)
+	citizen["movement_repath_attempt_count"] = 0
 	citizen["movement_failure_reason"] = (
 		CITY_CITIZEN_MOVEMENT_FAILURE_NONE
 	)
