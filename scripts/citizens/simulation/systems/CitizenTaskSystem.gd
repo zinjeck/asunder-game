@@ -9,12 +9,17 @@ const CityActivityLocationResolverScript = preload(
 )
 const MAX_WORK_PATH_REQUESTS_PER_TICK: int = 1
 const MAX_WORK_PATH_EXPANDED_NODES: int = 10_000
+const BLOCKED_WORK_TASK_RETRY_DELAY_MINUTES: int = 30
+
+static var _work_activity_claim_counts: Dictionary = {}
 
 
 static func run_tick(
 	tick_index: int,
 	minutes_advanced: int
 ) -> void:
+	_work_activity_claim_counts.clear()
+
 	if minutes_advanced <= 0:
 		return
 
@@ -29,6 +34,12 @@ static func run_tick(
 
 	if active_task_ids.is_empty():
 		return
+
+	_work_activity_claim_counts = (
+		_build_work_activity_claim_counts(
+			active_task_ids
+		)
+	)
 
 	var path_requests_remaining := (
 		MAX_WORK_PATH_REQUESTS_PER_TICK
@@ -149,6 +160,12 @@ static func _advance_work_task(
 			workplace
 		)
 	)
+	var preferred_activity_tiles := (
+		_get_preferred_work_activity_tiles(
+			activity_tiles,
+			citizen_id
+		)
+	)
 	var raw_current_tile = citizen.get(
 		"city_tile_position",
 		WorldData.INVALID_CITY_TILE_POSITION
@@ -182,7 +199,7 @@ static func _advance_work_task(
 				_set_work_task_blocked(citizen_id)
 				return path_requests_remaining
 
-			if activity_tiles.has(current_tile):
+			if preferred_activity_tiles.has(current_tile):
 				if (
 					movement_state
 					!= WorldData.CITY_CITIZEN_MOVEMENT_STATE_IDLE
@@ -232,7 +249,7 @@ static func _advance_work_task(
 				.find_path_to_any_city_tile(
 					city_world,
 					current_tile,
-					activity_tiles,
+					preferred_activity_tiles,
 					MAX_WORK_PATH_EXPANDED_NODES
 				)
 			)
@@ -269,11 +286,13 @@ static func _advance_work_task(
 				raw_selected_destination
 			)
 
-			if not activity_tiles.has(selected_destination):
+			if not preferred_activity_tiles.has(
+				selected_destination
+			):
 				_set_work_task_blocked(citizen_id)
 				return path_requests_remaining
 
-			if not WorldData.set_city_citizen_task_activity_state(
+			if not _set_work_task_activity_state(
 				citizen_id,
 				selected_destination
 			):
@@ -405,10 +424,25 @@ static func _advance_work_task(
 				)
 			)
 			var departing_tile := current_tile
+			var relocation_candidate_tiles: Array[Vector2i] = []
+
+			for candidate_tile in preferred_activity_tiles:
+				if candidate_tile == current_tile:
+					continue
+
+				relocation_candidate_tiles.append(
+					candidate_tile
+				)
+
+			if relocation_candidate_tiles.is_empty():
+				relocation_candidate_tiles = (
+					activity_tiles.duplicate()
+				)
+
 			var new_target_tile := (
 				CityActivityLocationResolverScript
 				.choose_work_activity_tile(
-					activity_tiles,
+					relocation_candidate_tiles,
 					current_tile,
 					previous_target_tile,
 					citizen_id,
@@ -498,7 +532,7 @@ static func _advance_work_task(
 
 				return path_requests_remaining
 
-			if not WorldData.set_city_citizen_task_activity_state(
+			if not _set_work_task_activity_state(
 				citizen_id,
 				new_target_tile,
 				departing_tile,
@@ -522,12 +556,197 @@ static func _advance_work_task(
 			)
 
 		WorldData.CITY_CITIZEN_TASK_PHASE_BLOCKED:
-			pass
+			_retry_blocked_work_task_if_due(
+				citizen_id,
+				current_task,
+				relocation_count
+			)
 
 		_:
 			_set_work_task_blocked(citizen_id)
 
 	return path_requests_remaining
+
+
+static func _build_work_activity_claim_counts(
+	active_task_ids: Array[int]
+) -> Dictionary:
+	var claim_counts: Dictionary = {}
+
+	for citizen_id in active_task_ids:
+		var citizen := WorldData.get_city_citizen_by_id(
+			citizen_id
+		)
+
+		if (
+			citizen.is_empty()
+			or not bool(citizen.get("alive", false))
+		):
+			continue
+
+		var current_task := (
+			WorldData.get_city_citizen_current_task(
+				citizen_id
+			)
+		)
+
+		if (
+			str(current_task.get("kind", ""))
+			!= WorldData.CITY_CITIZEN_TASK_KIND_WORK
+		):
+			continue
+
+		var task_phase := str(
+			current_task.get(
+				"phase",
+				WorldData.CITY_CITIZEN_TASK_PHASE_NONE
+			)
+		)
+
+		if (
+			task_phase != WorldData.CITY_CITIZEN_TASK_PHASE_PENDING
+			and task_phase != WorldData.CITY_CITIZEN_TASK_PHASE_TRAVELING
+			and task_phase != WorldData.CITY_CITIZEN_TASK_PHASE_PERFORMING
+		):
+			continue
+
+		var raw_target_tile = current_task.get(
+			"target_tile",
+			WorldData.INVALID_CITY_TILE_POSITION
+		)
+
+		if not raw_target_tile is Vector2i:
+			continue
+
+		var target_tile: Vector2i = raw_target_tile
+
+		if target_tile == WorldData.INVALID_CITY_TILE_POSITION:
+			continue
+
+		claim_counts[target_tile] = (
+			int(claim_counts.get(target_tile, 0))
+			+ 1
+		)
+
+	return claim_counts
+
+
+static func _get_preferred_work_activity_tiles(
+	activity_tiles: Array[Vector2i],
+	citizen_id: int
+) -> Array[Vector2i]:
+	var unclaimed_tiles: Array[Vector2i] = []
+	var current_task := (
+		WorldData.get_city_citizen_current_task(
+			citizen_id
+		)
+	)
+	var own_target_tile = current_task.get(
+		"target_tile",
+		WorldData.INVALID_CITY_TILE_POSITION
+	)
+
+	for candidate_tile in activity_tiles:
+		var other_claim_count := int(
+			_work_activity_claim_counts.get(
+				candidate_tile,
+				0
+			)
+		)
+
+		if (
+			own_target_tile is Vector2i
+			and candidate_tile == own_target_tile
+		):
+			other_claim_count = maxi(
+				other_claim_count - 1,
+				0
+			)
+
+		if other_claim_count <= 0:
+			unclaimed_tiles.append(candidate_tile)
+
+	if not unclaimed_tiles.is_empty():
+		return unclaimed_tiles
+
+	return activity_tiles.duplicate()
+
+
+static func _set_work_task_activity_state(
+	citizen_id: int,
+	target_tile: Vector2i,
+	previous_target_tile: Vector2i = (
+		WorldData.INVALID_CITY_TILE_POSITION
+	),
+	next_action_world_minute: int = (
+		WorldData.INVALID_CITY_CITIZEN_TASK_ACTION_WORLD_MINUTE
+	),
+	relocation_count: int = -1
+) -> bool:
+	var current_task := (
+		WorldData.get_city_citizen_current_task(
+			citizen_id
+		)
+	)
+	var raw_old_target_tile = current_task.get(
+		"target_tile",
+		WorldData.INVALID_CITY_TILE_POSITION
+	)
+	var old_target_tile := WorldData.INVALID_CITY_TILE_POSITION
+
+	if raw_old_target_tile is Vector2i:
+		old_target_tile = raw_old_target_tile
+
+	if not WorldData.set_city_citizen_task_activity_state(
+		citizen_id,
+		target_tile,
+		previous_target_tile,
+		next_action_world_minute,
+		relocation_count
+	):
+		return false
+
+	_replace_work_activity_claim(
+		old_target_tile,
+		target_tile
+	)
+	return true
+
+
+static func _replace_work_activity_claim(
+	old_target_tile: Vector2i,
+	new_target_tile: Vector2i
+) -> void:
+	if old_target_tile == new_target_tile:
+		return
+
+	if old_target_tile != WorldData.INVALID_CITY_TILE_POSITION:
+		var old_claim_count := int(
+			_work_activity_claim_counts.get(
+				old_target_tile,
+				0
+			)
+		)
+
+		if old_claim_count <= 1:
+			_work_activity_claim_counts.erase(
+				old_target_tile
+			)
+		else:
+			_work_activity_claim_counts[old_target_tile] = (
+				old_claim_count - 1
+			)
+
+	if new_target_tile != WorldData.INVALID_CITY_TILE_POSITION:
+		_work_activity_claim_counts[new_target_tile] = (
+			int(
+				_work_activity_claim_counts.get(
+					new_target_tile,
+					0
+				)
+			)
+			+ 1
+		)
 
 static func _get_deterministic_dwell_minutes(
 	citizen_id: int,
@@ -579,7 +798,7 @@ static func _begin_work_activity_dwell(
 			+ dwell_minutes
 		)
 
-	if not WorldData.set_city_citizen_task_activity_state(
+	if not _set_work_task_activity_state(
 		citizen_id,
 		target_tile,
 		previous_target_tile,
@@ -593,7 +812,89 @@ static func _begin_work_activity_dwell(
 		WorldData.CITY_CITIZEN_TASK_PHASE_PERFORMING
 	)
 
+static func _retry_blocked_work_task_if_due(
+	citizen_id: int,
+	current_task: Dictionary,
+	relocation_count: int
+) -> void:
+	var retry_world_minute := int(
+		current_task.get(
+			"next_action_world_minute",
+			WorldData.INVALID_CITY_CITIZEN_TASK_ACTION_WORLD_MINUTE
+		)
+	)
+
+	if (
+		retry_world_minute
+		== WorldData.INVALID_CITY_CITIZEN_TASK_ACTION_WORLD_MINUTE
+	):
+		_set_work_task_blocked(citizen_id)
+		return
+
+	if SimulationClock.absolute_world_minutes < retry_world_minute:
+		return
+
+	WorldData.cancel_city_citizen_movement(citizen_id)
+
+	if not _set_work_task_activity_state(
+		citizen_id,
+		WorldData.INVALID_CITY_TILE_POSITION,
+		WorldData.INVALID_CITY_TILE_POSITION,
+		WorldData.INVALID_CITY_CITIZEN_TASK_ACTION_WORLD_MINUTE,
+		relocation_count
+	):
+		_set_work_task_blocked(citizen_id)
+		return
+
+	if not WorldData.set_city_citizen_task_phase(
+		citizen_id,
+		WorldData.CITY_CITIZEN_TASK_PHASE_PENDING
+	):
+		_set_work_task_blocked(citizen_id)
+
+
 static func _set_work_task_blocked(citizen_id: int) -> void:
+	var current_task := (
+		WorldData.get_city_citizen_current_task(
+			citizen_id
+		)
+	)
+	var target_tile := WorldData.INVALID_CITY_TILE_POSITION
+	var previous_target_tile := (
+		WorldData.INVALID_CITY_TILE_POSITION
+	)
+	var raw_target_tile = current_task.get(
+		"target_tile",
+		WorldData.INVALID_CITY_TILE_POSITION
+	)
+	var raw_previous_target_tile = current_task.get(
+		"previous_target_tile",
+		WorldData.INVALID_CITY_TILE_POSITION
+	)
+
+	if raw_target_tile is Vector2i:
+		target_tile = raw_target_tile
+
+	if raw_previous_target_tile is Vector2i:
+		previous_target_tile = raw_previous_target_tile
+
+	var relocation_count := maxi(
+		int(current_task.get("relocation_count", 0)),
+		0
+	)
+	var retry_world_minute := (
+		SimulationClock.absolute_world_minutes
+		+ BLOCKED_WORK_TASK_RETRY_DELAY_MINUTES
+	)
+
+	WorldData.cancel_city_citizen_movement(citizen_id)
+	_set_work_task_activity_state(
+		citizen_id,
+		target_tile,
+		previous_target_tile,
+		retry_world_minute,
+		relocation_count
+	)
 	WorldData.set_city_citizen_task_phase(
 		citizen_id,
 		WorldData.CITY_CITIZEN_TASK_PHASE_BLOCKED
