@@ -124,6 +124,7 @@ var observed_city_public_storage_version: int = -1
 var observed_city_citizen_version: int = -1
 var observed_city_citizen_spatial_version: int = -1
 var observed_city_citizen_movement_version: int = -1
+var observed_city_citizen_task_version: int = -1
 var city_citizen_movement_presentation = (
 	CityCitizenMovementPresentationScript.new()
 )
@@ -203,6 +204,7 @@ func _ready() -> void:
 		city_world
 	)
 	WorldData.ensure_city_citizen_demographic_state()
+	WorldData.ensure_city_citizen_task_state()
 	WorldData.ensure_city_citizen_movement_state()
 	city_citizen_movement_presentation.initialize()
 	rebuild_city_terrain_texture()
@@ -251,6 +253,7 @@ func _process(delta: float) -> void:
 	var city_citizens_changed := false
 	var city_citizen_spatial_changed := false
 	var city_citizen_movement_changed := false
+	var city_citizen_task_changed := false
 	var city_assignments_changed := false
 	var city_workplaces_changed := false
 	var city_tile_data_changed := false
@@ -311,6 +314,15 @@ func _process(delta: float) -> void:
 		city_citizen_movement_changed = true
 
 	if (
+		observed_city_citizen_task_version
+		!= WorldData.city_citizen_task_version
+	):
+		observed_city_citizen_task_version = (
+			WorldData.city_citizen_task_version
+		)
+		city_citizen_task_changed = true
+
+	if (
 		observed_city_assignment_version
 		!= WorldData.city_assignment_version
 	):
@@ -362,6 +374,7 @@ func _process(delta: float) -> void:
 		or city_containers_changed
 		or city_citizens_changed
 		or city_citizen_movement_changed
+		or city_citizen_task_changed
 		or city_assignments_changed
 		or city_workplaces_changed
 		or city_tile_data_changed
@@ -382,6 +395,7 @@ func _process(delta: float) -> void:
 		or city_assignments_changed
 		or city_tile_data_changed
 		or city_citizen_movement_changed
+		or city_citizen_task_changed
 	):
 		update_debug_panel_text()
 
@@ -389,6 +403,7 @@ func _process(delta: float) -> void:
 		(
 			city_citizen_spatial_changed
 			or city_citizen_movement_changed
+			or city_citizen_task_changed
 		)
 		and WorldData.debug_mode_enabled
 	):
@@ -398,6 +413,7 @@ func _process(delta: float) -> void:
 		(
 			city_citizen_spatial_changed
 			or city_citizen_movement_changed
+			or city_citizen_task_changed
 		)
 		and selected_city_entity_kind
 		== CITY_SELECTION_KIND_CITIZEN
@@ -1854,7 +1870,7 @@ func get_workplace_production_status_display_name(
 		WorldData.WORKPLACE_PRODUCTION_STATUS_WORKING:
 			return "Working"
 		WorldData.WORKPLACE_PRODUCTION_STATUS_IDLE_NO_WORKERS:
-			return "Idle - No Workers"
+			return "Idle - No Workers Present"
 		WorldData.WORKPLACE_PRODUCTION_STATUS_BLOCKED_OUTPUT_FULL:
 			return "Blocked - Output Storage Full"
 		WorldData.WORKPLACE_PRODUCTION_STATUS_BLOCKED_MISSING_INPUT:
@@ -1918,7 +1934,22 @@ func update_selected_city_citizen_panel() -> void:
 	var state_text := str(
 		citizen.get("state", "unknown")
 	).capitalize()
+	var task_text := get_citizen_debug_task_text(citizen)
+	var task_target_text := "none"
+	var raw_current_task = citizen.get("current_task", {})
 
+	if raw_current_task is Dictionary:
+		var raw_task_target_tile = raw_current_task.get(
+			"target_tile",
+			WorldData.INVALID_CITY_TILE_POSITION
+		)
+
+		if (
+			raw_task_target_tile is Vector2i
+			and raw_task_target_tile
+			!= WorldData.INVALID_CITY_TILE_POSITION
+		):
+			task_target_text = str(raw_task_target_tile)
 	object_info_title_label.text = citizen_name
 	var movement_state_text := str(
 		citizen.get(
@@ -1951,6 +1982,8 @@ func update_selected_city_citizen_panel() -> void:
 			),
 		"Position: " + position_text,
 		"State: " + state_text,
+		"Task: " + task_text,
+		"Activity tile: " + task_target_text,
 		"Movement: " + movement_text,
 		"Home: "
 			+ get_citizen_debug_home_text(
@@ -2069,7 +2102,7 @@ func update_selected_entity_panel() -> void:
 		)
 
 		body_lines.append(
-			"Workers: "
+			"Assigned: "
 			+ str(
 				WorldData.get_city_object_worker_count(
 					city_object
@@ -2078,6 +2111,15 @@ func update_selected_entity_panel() -> void:
 			+ " / "
 			+ str(
 				WorldData.get_city_object_worker_capacity(
+					city_object
+				)
+			)
+		)
+
+		body_lines.append(
+			"Present: "
+			+ str(
+				WorldData.get_city_object_attending_worker_count(
 					city_object
 				)
 			)
@@ -5490,6 +5532,7 @@ func get_citizen_debug_line(citizen: Dictionary) -> String:
 	var citizen_name := str(citizen.get("name", "Citizen " + str(citizen_id)))
 	var home_text := get_citizen_debug_home_text(citizen)
 	var job_text := get_citizen_debug_job_text(citizen)
+	var task_text := get_citizen_debug_task_text(citizen)
 	var state_text := str(citizen.get("state", "unknown"))
 	var raw_position = citizen.get(
 		"city_tile_position",
@@ -5516,6 +5559,7 @@ func get_citizen_debug_line(citizen: Dictionary) -> String:
 		+ " | Job: " + job_text
 		+ " | Pos " + position_text
 		+ " | " + state_text
+		+ " | Task: " + task_text
 		+ " | Hunger " + str(hunger)
 		+ " | Happiness " + str(happiness)
 		+ " | Inv " + str(inventory_used) + "/" + str(carry_capacity)
@@ -5548,6 +5592,54 @@ func get_citizen_debug_job_text(citizen: Dictionary) -> String:
 
 	return get_city_object_display_name(job_object) + " #" + str(job_object_id)
 
+func get_citizen_debug_task_text(citizen: Dictionary) -> String:
+	var raw_current_task = citizen.get("current_task", {})
+
+	if not raw_current_task is Dictionary:
+		return "invalid"
+
+	var current_task: Dictionary = raw_current_task
+	var task_kind := str(
+		current_task.get(
+			"kind",
+			WorldData.CITY_CITIZEN_TASK_KIND_NONE
+		)
+	)
+
+	if task_kind == WorldData.CITY_CITIZEN_TASK_KIND_NONE:
+		return "None"
+
+	var task_phase := str(
+		current_task.get(
+			"phase",
+			WorldData.CITY_CITIZEN_TASK_PHASE_NONE
+		)
+	)
+	var task_text := task_kind.capitalize()
+
+	if task_phase != WorldData.CITY_CITIZEN_TASK_PHASE_NONE:
+		task_text += " (" + task_phase.capitalize() + ")"
+
+	var target_object_id := int(
+		current_task.get("target_object_id", -1)
+	)
+
+	if target_object_id > 0:
+		var target_object := get_city_object_by_id(
+			target_object_id
+		)
+
+		if target_object.is_empty():
+			task_text += " -> missing #" + str(target_object_id)
+		else:
+			task_text += (
+				" -> "
+				+ get_city_object_display_name(target_object)
+				+ " #"
+				+ str(target_object_id)
+			)
+
+	return task_text
 
 func get_citizen_debug_inventory_used(citizen: Dictionary) -> int:
 	var inventory = citizen.get("inventory", {})

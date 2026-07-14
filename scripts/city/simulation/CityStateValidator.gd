@@ -43,6 +43,11 @@ static func validate(
 		errors,
 		citizen_lookup
 	)
+	_validate_city_citizen_task_state(
+		errors,
+		citizen_lookup,
+		object_lookup
+	)
 	_validate_city_citizen_movement_state(
 		errors,
 		citizen_lookup
@@ -95,6 +100,9 @@ static func validate(
 		),
 		"citizen_movement_version": (
 			WorldData.city_citizen_movement_version
+		),
+		"citizen_task_version": (
+			WorldData.city_citizen_task_version
 		),
 		"assignment_version": WorldData.city_assignment_version,
 		"workplace_version": WorldData.city_workplace_version
@@ -151,7 +159,16 @@ static func get_summary_text() -> String:
 static func _validation_cache_matches_current_state() -> bool:
 	if _cached_result.is_empty():
 		return false
-
+	if (
+		int(
+			_cached_result.get(
+				"citizen_task_version",
+				-1
+			)
+		)
+		!= WorldData.city_citizen_task_version
+	):
+		return false
 	if (
 		int(_cached_result.get("object_version", -1))
 		!= WorldData.city_object_version
@@ -948,6 +965,496 @@ static func _validate_city_citizen_demographics(
 					+ str(female_count)
 					+ " female citizens."
 			)
+
+static func _validate_city_citizen_task_state(
+	errors: Array[String],
+	citizen_lookup: Dictionary,
+	object_lookup: Dictionary
+) -> void:
+	var required_task_fields: Array[String] = [
+		"kind",
+		"source",
+		"phase",
+		"priority",
+		"target_object_id",
+		"start_world_minute",
+		"target_tile",
+		"previous_target_tile",
+		"next_action_world_minute",
+		"relocation_count",
+		"player_locked"
+	]
+	var expected_active_task_ids: Array[int] = []
+
+	for raw_citizen_id in citizen_lookup.keys():
+		var citizen_id: int = raw_citizen_id
+		var citizen_index := int(
+			citizen_lookup[citizen_id]
+		)
+		var citizen: Dictionary = (
+			WorldData.city_citizens[citizen_index]
+		)
+
+		if not citizen.has("current_task"):
+			errors.append(
+				"Citizen "
+				+ str(citizen_id)
+				+ " is missing current_task."
+			)
+			continue
+
+		var raw_current_task = citizen.get("current_task")
+
+		if not raw_current_task is Dictionary:
+			errors.append(
+				"Citizen "
+				+ str(citizen_id)
+				+ " has a non-Dictionary current_task."
+			)
+			continue
+
+		var current_task: Dictionary = raw_current_task
+		var missing_task_field := false
+
+		for task_field in required_task_fields:
+			if current_task.has(task_field):
+				continue
+
+			errors.append(
+				"Citizen "
+				+ str(citizen_id)
+				+ " current_task is missing '"
+				+ task_field
+				+ "'."
+			)
+			missing_task_field = true
+
+		if missing_task_field:
+			continue
+
+		var raw_task_kind = current_task.get("kind")
+		var raw_task_source = current_task.get("source")
+		var raw_task_phase = current_task.get("phase")
+		var raw_task_priority = current_task.get("priority")
+		var raw_target_object_id = current_task.get(
+			"target_object_id"
+		)
+		var raw_start_world_minute = current_task.get(
+			"start_world_minute"
+		)
+		var raw_target_tile = current_task.get(
+			"target_tile"
+		)
+		var raw_previous_target_tile = current_task.get(
+			"previous_target_tile"
+		)
+		var raw_next_action_world_minute = current_task.get(
+			"next_action_world_minute"
+		)
+		var raw_relocation_count = current_task.get(
+			"relocation_count"
+		)
+		var raw_player_locked = current_task.get(
+			"player_locked"
+		)
+		var task_types_are_valid := true
+
+		if typeof(raw_task_kind) != TYPE_STRING:
+			errors.append(
+				"Citizen "
+				+ str(citizen_id)
+				+ " has a non-string task kind."
+			)
+			task_types_are_valid = false
+
+		if typeof(raw_task_source) != TYPE_STRING:
+			errors.append(
+				"Citizen "
+				+ str(citizen_id)
+				+ " has a non-string task source."
+			)
+			task_types_are_valid = false
+
+		if typeof(raw_task_phase) != TYPE_STRING:
+			errors.append(
+				"Citizen "
+				+ str(citizen_id)
+				+ " has a non-string task phase."
+			)
+			task_types_are_valid = false
+
+		if typeof(raw_task_priority) != TYPE_INT:
+			errors.append(
+				"Citizen "
+				+ str(citizen_id)
+				+ " has a non-integer task priority."
+			)
+			task_types_are_valid = false
+
+		if typeof(raw_target_object_id) != TYPE_INT:
+			errors.append(
+				"Citizen "
+				+ str(citizen_id)
+				+ " has a non-integer task target object ID."
+			)
+			task_types_are_valid = false
+
+		if typeof(raw_start_world_minute) != TYPE_INT:
+			errors.append(
+				"Citizen "
+				+ str(citizen_id)
+				+ " has a non-integer task start minute."
+			)
+			task_types_are_valid = false
+		if not raw_target_tile is Vector2i:
+			errors.append(
+				"Citizen "
+				+ str(citizen_id)
+				+ " has a non-Vector2i task target tile."
+			)
+			task_types_are_valid = false
+
+		if not raw_previous_target_tile is Vector2i:
+			errors.append(
+				"Citizen "
+				+ str(citizen_id)
+				+ " has a non-Vector2i previous task target tile."
+			)
+			task_types_are_valid = false
+
+		if typeof(raw_next_action_world_minute) != TYPE_INT:
+			errors.append(
+				"Citizen "
+				+ str(citizen_id)
+				+ " has a non-integer next task action minute."
+			)
+			task_types_are_valid = false
+		if typeof(raw_relocation_count) != TYPE_INT:
+			errors.append(
+				"Citizen "
+				+ str(citizen_id)
+				+ " has a non-integer task relocation count."
+			)
+			task_types_are_valid = false
+		if typeof(raw_player_locked) != TYPE_BOOL:
+			errors.append(
+				"Citizen "
+				+ str(citizen_id)
+				+ " has a non-boolean task player lock."
+			)
+			task_types_are_valid = false
+
+		if not task_types_are_valid:
+			continue
+
+		var task_kind: String = raw_task_kind
+		var task_source: String = raw_task_source
+		var task_phase: String = raw_task_phase
+		var task_priority: int = raw_task_priority
+		var target_object_id: int = raw_target_object_id
+		var start_world_minute: int = raw_start_world_minute
+		var player_locked: bool = raw_player_locked
+		var task_values_are_valid := true
+
+		if not WorldData.is_valid_city_citizen_task_kind(
+			task_kind
+		):
+			errors.append(
+				"Citizen "
+				+ str(citizen_id)
+				+ " has invalid task kind '"
+				+ task_kind
+				+ "'."
+			)
+			task_values_are_valid = false
+
+		if not WorldData.is_valid_city_citizen_task_source(
+			task_source
+		):
+			errors.append(
+				"Citizen "
+				+ str(citizen_id)
+				+ " has invalid task source '"
+				+ task_source
+				+ "'."
+			)
+			task_values_are_valid = false
+
+		if not WorldData.is_valid_city_citizen_task_phase(
+			task_phase
+		):
+			errors.append(
+				"Citizen "
+				+ str(citizen_id)
+				+ " has invalid task phase '"
+				+ task_phase
+				+ "'."
+			)
+			task_values_are_valid = false
+
+		if not task_values_are_valid:
+			continue
+
+		if task_kind == WorldData.CITY_CITIZEN_TASK_KIND_NONE:
+			if task_source != WorldData.CITY_CITIZEN_TASK_SOURCE_NONE:
+				errors.append(
+					"Citizen "
+					+ str(citizen_id)
+					+ " has no task but has task source '"
+					+ task_source
+					+ "'."
+				)
+
+			if task_phase != WorldData.CITY_CITIZEN_TASK_PHASE_NONE:
+				errors.append(
+					"Citizen "
+					+ str(citizen_id)
+					+ " has no task but has task phase '"
+					+ task_phase
+					+ "'."
+				)
+
+			if task_priority != WorldData.CITY_CITIZEN_TASK_PRIORITY_NONE:
+				errors.append(
+					"Citizen "
+					+ str(citizen_id)
+					+ " has no task but has priority "
+					+ str(task_priority)
+					+ "."
+				)
+
+			if target_object_id != -1:
+				errors.append(
+					"Citizen "
+					+ str(citizen_id)
+					+ " has no task but targets object "
+					+ str(target_object_id)
+					+ "."
+				)
+
+			if (
+				start_world_minute
+				!= WorldData.INVALID_CITY_CITIZEN_TASK_START_WORLD_MINUTE
+			):
+				errors.append(
+					"Citizen "
+					+ str(citizen_id)
+					+ " has no task but has start minute "
+					+ str(start_world_minute)
+					+ "."
+				)
+
+			if player_locked:
+				errors.append(
+					"Citizen "
+					+ str(citizen_id)
+					+ " has no task but is player-locked."
+				)
+
+			continue
+
+		if not bool(citizen.get("alive", false)):
+			errors.append(
+				"Dead citizen "
+					+ str(citizen_id)
+					+ " retains an active task."
+			)
+		else:
+			expected_active_task_ids.append(citizen_id)
+
+		if task_source == WorldData.CITY_CITIZEN_TASK_SOURCE_NONE:
+			errors.append(
+				"Citizen "
+				+ str(citizen_id)
+				+ " has active task '"
+				+ task_kind
+				+ "' with no source."
+			)
+
+		if task_phase == WorldData.CITY_CITIZEN_TASK_PHASE_NONE:
+			errors.append(
+				"Citizen "
+				+ str(citizen_id)
+				+ " has active task '"
+				+ task_kind
+				+ "' with no phase."
+			)
+
+		if task_priority <= WorldData.CITY_CITIZEN_TASK_PRIORITY_NONE:
+			errors.append(
+				"Citizen "
+				+ str(citizen_id)
+				+ " has active task '"
+				+ task_kind
+				+ "' with non-positive priority "
+				+ str(task_priority)
+				+ "."
+			)
+
+		if start_world_minute < 0:
+			errors.append(
+				"Citizen "
+				+ str(citizen_id)
+				+ " has active task '"
+				+ task_kind
+				+ "' with invalid start minute "
+				+ str(start_world_minute)
+				+ "."
+			)
+
+		if (
+			player_locked
+			and task_source
+			!= WorldData.CITY_CITIZEN_TASK_SOURCE_PLAYER
+		):
+			errors.append(
+				"Citizen "
+				+ str(citizen_id)
+				+ " has a player lock on non-player task source '"
+				+ task_source
+				+ "'."
+			)
+
+		match task_kind:
+			WorldData.CITY_CITIZEN_TASK_KIND_WORK:
+				if target_object_id <= 0:
+					errors.append(
+						"Citizen "
+						+ str(citizen_id)
+						+ " work task has invalid target object ID "
+						+ str(target_object_id)
+						+ "."
+					)
+					continue
+
+				if not object_lookup.has(target_object_id):
+					errors.append(
+						"Citizen "
+						+ str(citizen_id)
+						+ " work task targets missing object "
+						+ str(target_object_id)
+						+ "."
+					)
+					continue
+
+				var target_object := (
+					WorldData.get_city_object_by_id(
+						target_object_id
+					)
+				)
+
+				if not WorldData.city_object_is_workplace(
+					target_object
+				):
+					errors.append(
+						"Citizen "
+						+ str(citizen_id)
+						+ " work task targets non-workplace object "
+						+ str(target_object_id)
+						+ "."
+					)
+
+				if (
+					int(citizen.get("job_object_id", -1))
+					!= target_object_id
+				):
+					errors.append(
+						"Citizen "
+						+ str(citizen_id)
+						+ " work task targets object "
+						+ str(target_object_id)
+						+ ", but its assigned workplace is "
+						+ str(citizen.get("job_object_id", -1))
+						+ "."
+					)
+				if (
+					task_phase
+					== WorldData.CITY_CITIZEN_TASK_PHASE_PERFORMING
+					and not WorldData.is_city_citizen_attending_workplace(
+						citizen_id,
+						target_object_id
+					)
+				):
+					errors.append(
+						"Citizen "
+							+ str(citizen_id)
+							+ " has a performing work task but is not "
+							+ "physically attending workplace "
+							+ str(target_object_id)
+							+ "."
+					)
+	expected_active_task_ids.sort()
+
+	if WorldData.city_active_task_ids != expected_active_task_ids:
+		errors.append(
+			"Active task registry does not match living citizens "
+				+ "with active tasks. Expected "
+				+ str(expected_active_task_ids)
+				+ ", found "
+				+ str(WorldData.city_active_task_ids)
+				+ "."
+		)
+
+	var seen_active_task_ids: Dictionary = {}
+
+	for raw_active_task_id in WorldData.city_active_task_ids:
+		if typeof(raw_active_task_id) != TYPE_INT:
+			errors.append(
+				"Active task registry contains a non-integer ID."
+			)
+			continue
+
+		var active_task_id: int = raw_active_task_id
+
+		if seen_active_task_ids.has(active_task_id):
+			errors.append(
+				"Active task registry contains duplicate citizen ID "
+					+ str(active_task_id)
+					+ "."
+			)
+			continue
+
+		seen_active_task_ids[active_task_id] = true
+
+		if not citizen_lookup.has(active_task_id):
+			errors.append(
+				"Active task registry contains missing citizen ID "
+					+ str(active_task_id)
+					+ "."
+			)
+
+		if not WorldData.city_active_task_id_lookup.has(
+			active_task_id
+		):
+			errors.append(
+				"Active task lookup is missing citizen ID "
+					+ str(active_task_id)
+					+ "."
+			)
+
+	for raw_lookup_id in WorldData.city_active_task_id_lookup.keys():
+		if typeof(raw_lookup_id) != TYPE_INT:
+			errors.append(
+				"Active task lookup contains a non-integer ID."
+			)
+			continue
+
+		var lookup_id: int = raw_lookup_id
+
+		if not seen_active_task_ids.has(lookup_id):
+			errors.append(
+				"Active task lookup contains citizen ID "
+					+ str(lookup_id)
+					+ " that is absent from the registry array."
+			)
+
+	if (
+		WorldData.city_active_task_id_lookup.size()
+		!= WorldData.city_active_task_ids.size()
+	):
+		errors.append(
+			"Active task registry array and lookup have different sizes."
+		)
 
 static func _validate_city_citizen_movement_state(
 	errors: Array[String],
@@ -2781,7 +3288,7 @@ static func _validate_workplace_runtime_production_state(
 						+ str(object_id)
 						+ " caches "
 						+ str(productive_worker_count)
-						+ " productive workers, but current assignment data yields "
+						+ " productive workers, but current attendance state yields "
 						+ str(expected_productive_worker_count)
 						+ "."
 				)
@@ -2851,6 +3358,12 @@ static func _get_expected_productive_worker_count(
 			continue
 
 		if int(citizen.get("job_object_id", -1)) != workplace_id:
+			continue
+
+		if not WorldData.is_city_citizen_attending_workplace(
+			worker_id,
+			workplace_id
+		):
 			continue
 
 		productive_worker_count += 1

@@ -79,6 +79,8 @@ static var city_citizen_index_by_id: Dictionary = {}
 static var city_citizen_ids_by_tile: Dictionary = {}
 static var city_active_mover_ids: Array[int] = []
 static var city_active_mover_id_lookup: Dictionary = {}
+static var city_active_task_ids: Array[int] = []
+static var city_active_task_id_lookup: Dictionary = {}
 static var next_city_citizen_id: int = 1
 
 # Focused change versions.
@@ -91,6 +93,7 @@ static var city_public_storage_version: int = 0
 static var city_citizen_version: int = 0
 static var city_citizen_spatial_version: int = 0
 static var city_citizen_movement_version: int = 0
+static var city_citizen_task_version: int = 0
 static var city_assignment_version: int = 0
 static var city_workplace_version: int = 0
 static var city_citizen_male_name_pool: Array[String] = (
@@ -123,6 +126,45 @@ const DEFAULT_CITIZEN_HAPPINESS := (
 )
 const CITY_CITIZEN_STATE_IDLE := (
 	CityCitizensScript.CITY_CITIZEN_STATE_IDLE
+)
+const CITY_CITIZEN_TASK_KIND_NONE: String = (
+	CityCitizensScript.CITY_CITIZEN_TASK_KIND_NONE
+)
+const CITY_CITIZEN_TASK_KIND_WORK: String = (
+	CityCitizensScript.CITY_CITIZEN_TASK_KIND_WORK
+)
+const CITY_CITIZEN_TASK_SOURCE_NONE: String = (
+	CityCitizensScript.CITY_CITIZEN_TASK_SOURCE_NONE
+)
+const CITY_CITIZEN_TASK_SOURCE_PLAYER: String = (
+	CityCitizensScript.CITY_CITIZEN_TASK_SOURCE_PLAYER
+)
+const CITY_CITIZEN_TASK_SOURCE_SCHEDULE: String = (
+	CityCitizensScript.CITY_CITIZEN_TASK_SOURCE_SCHEDULE
+)
+const CITY_CITIZEN_TASK_PHASE_NONE: String = (
+	CityCitizensScript.CITY_CITIZEN_TASK_PHASE_NONE
+)
+const CITY_CITIZEN_TASK_PHASE_PENDING: String = (
+	CityCitizensScript.CITY_CITIZEN_TASK_PHASE_PENDING
+)
+const CITY_CITIZEN_TASK_PHASE_TRAVELING: String = (
+	CityCitizensScript.CITY_CITIZEN_TASK_PHASE_TRAVELING
+)
+const CITY_CITIZEN_TASK_PHASE_PERFORMING: String = (
+	CityCitizensScript.CITY_CITIZEN_TASK_PHASE_PERFORMING
+)
+const CITY_CITIZEN_TASK_PHASE_BLOCKED: String = (
+	CityCitizensScript.CITY_CITIZEN_TASK_PHASE_BLOCKED
+)
+const CITY_CITIZEN_TASK_PRIORITY_NONE: int = (
+	CityCitizensScript.CITY_CITIZEN_TASK_PRIORITY_NONE
+)
+const INVALID_CITY_CITIZEN_TASK_START_WORLD_MINUTE: int = (
+	CityCitizensScript.INVALID_CITY_CITIZEN_TASK_START_WORLD_MINUTE
+)
+const INVALID_CITY_CITIZEN_TASK_ACTION_WORLD_MINUTE: int = (
+	CityCitizensScript.INVALID_CITY_CITIZEN_TASK_ACTION_WORLD_MINUTE
 )
 const INVALID_CITY_TILE_POSITION := (
 	CityCitizensScript.INVALID_CITY_TILE_POSITION
@@ -194,6 +236,18 @@ const WORKPLACE_WORK_LOCATION_MODE_LINKED_TILES := "linked_tiles"
 const WORKPLACE_WORK_LOCATION_MODE_WORKSTATIONS := "workstations"
 const WORKPLACE_WORK_LOCATION_MODE_EXPLICIT_POINTS := "explicit_points"
 const WORKPLACE_WORK_LOCATION_MODE_FOOTPRINT := "footprint"
+const WORKPLACE_WORK_LOCATION_ZONE_SOURCE_RESOURCE_SOURCE := (
+	"resource_source"
+)
+
+const WORKPLACE_WORK_LOCATION_TILE_REQUIREMENT_WALKABLE := (
+	"walkable"
+)
+
+const WORKPLACE_WORK_LOCATION_ADJACENCY_NONE := "none"
+const WORKPLACE_WORK_LOCATION_ADJACENCY_CARDINAL_TERRAIN := (
+	"cardinal_terrain"
+)
 const WORKPLACE_MOVEMENT_MODE_NONE := "none"
 const WORKPLACE_MOVEMENT_MODE_MOVE_BETWEEN_WORK_POINTS := "move_between_work_points"
 const WORKPLACE_MOVEMENT_MODE_STATION_BASED := "station_based"
@@ -325,10 +379,25 @@ static func setup_city_object_definitions() -> void:
 			"source_tiles_for_full_productivity": 100
 		},
 		"work_location_policy": {
-			"mode": WORKPLACE_WORK_LOCATION_MODE_RESOURCE_SOURCE_TILES
+			"mode": WORKPLACE_WORK_LOCATION_MODE_RESOURCE_SOURCE_TILES,
+			"zone_source": (
+				WORKPLACE_WORK_LOCATION_ZONE_SOURCE_RESOURCE_SOURCE
+			),
+			"standing_tile_requirement": (
+				WORKPLACE_WORK_LOCATION_TILE_REQUIREMENT_WALKABLE
+			),
+			"adjacency_mode": (
+				WORKPLACE_WORK_LOCATION_ADJACENCY_CARDINAL_TERRAIN
+			),
+			"adjacent_terrain": TERRAIN_WATER
 		},
 		"work_movement_policy": {
-			"mode": WORKPLACE_MOVEMENT_MODE_MOVE_BETWEEN_WORK_POINTS
+			"mode": WORKPLACE_MOVEMENT_MODE_MOVE_BETWEEN_WORK_POINTS,
+			"dwell_min_minutes": 120,
+			"dwell_max_minutes": 360,
+			"maximum_relocations_per_task": 1,
+			"minimum_relocation_distance": 4,
+			"avoid_previous_target": true
 		},
 		"break_location_policy": {
 			"mode": WORKPLACE_BREAK_LOCATION_MODE_FOOTPRINT_RADIUS,
@@ -1089,6 +1158,9 @@ static func _mark_city_citizen_spatial_changed() -> void:
 static func _mark_city_citizen_movement_changed() -> void:
 	city_citizen_movement_version += 1
 
+static func _mark_city_citizen_task_changed() -> void:
+	city_citizen_task_version += 1
+
 static func _mark_city_assignments_changed() -> void:
 	city_assignment_version += 1
 
@@ -1194,6 +1266,64 @@ static func rebuild_city_active_mover_registry() -> void:
 
 static func get_city_active_mover_ids_snapshot() -> Array[int]:
 	return city_active_mover_ids.duplicate()
+
+static func _add_city_active_task_id(
+	citizen_id: int
+) -> void:
+	if citizen_id <= 0:
+		return
+
+	if city_active_task_id_lookup.has(citizen_id):
+		return
+
+	city_active_task_ids.append(citizen_id)
+	city_active_task_ids.sort()
+	city_active_task_id_lookup[citizen_id] = true
+
+
+static func _remove_city_active_task_id(
+	citizen_id: int
+) -> void:
+	city_active_task_id_lookup.erase(citizen_id)
+	city_active_task_ids.erase(citizen_id)
+
+
+static func rebuild_city_active_task_registry() -> void:
+	city_active_task_ids.clear()
+	city_active_task_id_lookup.clear()
+
+	for raw_citizen in city_citizens:
+		if not raw_citizen is Dictionary:
+			continue
+
+		var citizen: Dictionary = raw_citizen
+
+		if not bool(citizen.get("alive", false)):
+			continue
+
+		var raw_current_task = citizen.get("current_task", {})
+
+		if not raw_current_task is Dictionary:
+			continue
+
+		var current_task: Dictionary = raw_current_task
+
+		if (
+			str(current_task.get("kind", ""))
+			== CITY_CITIZEN_TASK_KIND_NONE
+		):
+			continue
+
+		var citizen_id := int(citizen.get("id", -1))
+
+		if citizen_id <= 0:
+			continue
+
+		_add_city_active_task_id(citizen_id)
+
+
+static func get_city_active_task_ids_snapshot() -> Array[int]:
+	return city_active_task_ids.duplicate()
 
 static func _add_city_citizen_to_spatial_index(
 	citizen_id: int,
@@ -1523,11 +1653,15 @@ static func reset_city_citizen_state() -> void:
 	city_citizen_ids_by_tile.clear()
 	city_active_mover_ids.clear()
 	city_active_mover_id_lookup.clear()
+	city_active_task_ids.clear()
+	city_active_task_id_lookup.clear()
 	next_city_citizen_id = 1
+	CitizenDecisionSystem.reset_runtime_state()
 
 	_mark_city_citizens_changed()
 	_mark_city_citizen_spatial_changed()
 	_mark_city_citizen_movement_changed()
+	_mark_city_citizen_task_changed()
 	_mark_city_assignments_changed()
 
 static func make_empty_citizen_inventory() -> Dictionary:
@@ -1900,6 +2034,394 @@ static func ensure_city_citizen_demographic_state() -> int:
 		_mark_city_citizens_changed()
 
 	return migrated_count
+
+static func is_valid_city_citizen_task_kind(
+	task_kind: String
+) -> bool:
+	return CityCitizensScript.is_valid_city_citizen_task_kind(
+		task_kind
+	)
+
+
+static func is_valid_city_citizen_task_source(
+	task_source: String
+) -> bool:
+	return CityCitizensScript.is_valid_city_citizen_task_source(
+		task_source
+	)
+
+
+static func is_valid_city_citizen_task_phase(
+	task_phase: String
+) -> bool:
+	return CityCitizensScript.is_valid_city_citizen_task_phase(
+		task_phase
+	)
+
+
+static func ensure_city_citizen_task_state() -> int:
+	if city_citizens.is_empty():
+		city_active_task_ids.clear()
+		city_active_task_id_lookup.clear()
+		return 0
+
+	var migrated_count := 0
+
+	for citizen_index in range(city_citizens.size()):
+		var raw_citizen = city_citizens[citizen_index]
+
+		if not raw_citizen is Dictionary:
+			continue
+
+		var citizen: Dictionary = raw_citizen
+
+		if (
+			CityCitizensScript
+			.has_complete_city_citizen_task_state(
+				citizen
+			)
+		):
+			continue
+
+		CityCitizensScript.reset_city_citizen_task_state(
+			citizen
+		)
+		city_citizens[citizen_index] = citizen
+		migrated_count += 1
+
+	rebuild_city_active_task_registry()
+
+	if migrated_count > 0:
+		_mark_city_citizen_task_changed()
+
+	return migrated_count
+
+static func get_city_citizen_current_task(
+	citizen_id: int
+) -> Dictionary:
+	var citizen := get_city_citizen_by_id(citizen_id)
+
+	if citizen.is_empty():
+		return {}
+
+	var raw_current_task = citizen.get("current_task", {})
+
+	if not raw_current_task is Dictionary:
+		return {}
+
+	return raw_current_task.duplicate(true)
+
+
+static func assign_city_citizen_task(
+	citizen_id: int,
+	task_values: Dictionary
+) -> bool:
+	var citizen_index := get_city_citizen_index_by_id(
+		citizen_id
+	)
+
+	if citizen_index < 0:
+		return false
+
+	var raw_citizen = city_citizens[citizen_index]
+
+	if not raw_citizen is Dictionary:
+		return false
+
+	var citizen: Dictionary = raw_citizen
+
+	if not bool(citizen.get("alive", false)):
+		return false
+
+	var raw_task_kind = task_values.get("kind")
+	var raw_task_source = task_values.get("source")
+	var raw_task_priority = task_values.get("priority")
+	var raw_target_object_id = task_values.get(
+		"target_object_id"
+	)
+	var raw_player_locked = task_values.get(
+		"player_locked",
+		false
+	)
+
+	if typeof(raw_task_kind) != TYPE_STRING:
+		return false
+
+	if typeof(raw_task_source) != TYPE_STRING:
+		return false
+
+	if typeof(raw_task_priority) != TYPE_INT:
+		return false
+
+	if typeof(raw_target_object_id) != TYPE_INT:
+		return false
+
+	if typeof(raw_player_locked) != TYPE_BOOL:
+		return false
+
+	var task_kind: String = raw_task_kind
+	var task_source: String = raw_task_source
+	var task_priority: int = raw_task_priority
+	var target_object_id: int = raw_target_object_id
+	var player_locked: bool = raw_player_locked
+
+	if (
+		not is_valid_city_citizen_task_kind(task_kind)
+		or task_kind == CITY_CITIZEN_TASK_KIND_NONE
+	):
+		return false
+
+	if (
+		not is_valid_city_citizen_task_source(task_source)
+		or task_source == CITY_CITIZEN_TASK_SOURCE_NONE
+	):
+		return false
+
+	if task_priority <= CITY_CITIZEN_TASK_PRIORITY_NONE:
+		return false
+
+	if target_object_id <= 0:
+		return false
+
+	if (
+		player_locked
+		and task_source != CITY_CITIZEN_TASK_SOURCE_PLAYER
+	):
+		return false
+
+	var raw_existing_task = citizen.get("current_task", {})
+
+	if raw_existing_task is Dictionary:
+		var existing_task: Dictionary = raw_existing_task
+
+		if (
+			bool(existing_task.get("player_locked", false))
+			and task_source != CITY_CITIZEN_TASK_SOURCE_PLAYER
+		):
+			return false
+
+	match task_kind:
+		CITY_CITIZEN_TASK_KIND_WORK:
+			var workplace := get_city_object_by_id(
+				target_object_id
+			)
+
+			if (
+				workplace.is_empty()
+				or not city_object_is_workplace(workplace)
+			):
+				return false
+
+			if (
+				int(citizen.get("job_object_id", -1))
+				!= target_object_id
+			):
+				return false
+
+		_:
+			return false
+
+	var current_task := (
+		CityCitizensScript.make_city_citizen_task({
+			"kind": task_kind,
+			"source": task_source,
+			"phase": CITY_CITIZEN_TASK_PHASE_PENDING,
+			"priority": task_priority,
+			"target_object_id": target_object_id,
+			"start_world_minute": (
+				SimulationClock.absolute_world_minutes
+			),
+			"player_locked": player_locked
+		})
+	)
+
+	citizen["current_task"] = current_task
+	city_citizens[citizen_index] = citizen
+	_add_city_active_task_id(citizen_id)
+	_mark_city_citizen_task_changed()
+
+	return true
+
+
+static func set_city_citizen_task_phase(
+	citizen_id: int,
+	task_phase: String
+) -> bool:
+	if (
+		not is_valid_city_citizen_task_phase(task_phase)
+		or task_phase == CITY_CITIZEN_TASK_PHASE_NONE
+	):
+		return false
+
+	var citizen_index := get_city_citizen_index_by_id(
+		citizen_id
+	)
+
+	if citizen_index < 0:
+		return false
+
+	var raw_citizen = city_citizens[citizen_index]
+
+	if not raw_citizen is Dictionary:
+		return false
+
+	var citizen: Dictionary = raw_citizen
+	var raw_current_task = citizen.get("current_task", {})
+
+	if not raw_current_task is Dictionary:
+		return false
+
+	var current_task: Dictionary = (
+		raw_current_task.duplicate(true)
+	)
+
+	if (
+		str(current_task.get("kind", ""))
+		== CITY_CITIZEN_TASK_KIND_NONE
+	):
+		return false
+
+	if str(current_task.get("phase", "")) == task_phase:
+		return true
+
+	current_task["phase"] = task_phase
+	citizen["current_task"] = current_task
+	city_citizens[citizen_index] = citizen
+	_mark_city_citizen_task_changed()
+
+	return true
+
+static func set_city_citizen_task_activity_state(
+	citizen_id: int,
+	target_tile: Vector2i,
+	previous_target_tile: Vector2i = INVALID_CITY_TILE_POSITION,
+	next_action_world_minute: int = (
+		INVALID_CITY_CITIZEN_TASK_ACTION_WORLD_MINUTE
+	),
+	relocation_count: int = -1
+) -> bool:
+	var citizen_index := get_city_citizen_index_by_id(
+		citizen_id
+	)
+
+	if citizen_index < 0:
+		return false
+
+	var raw_citizen = city_citizens[citizen_index]
+
+	if not raw_citizen is Dictionary:
+		return false
+
+	var citizen: Dictionary = raw_citizen
+	var raw_current_task = citizen.get(
+		"current_task",
+		{}
+	)
+
+	if not raw_current_task is Dictionary:
+		return false
+
+	var current_task: Dictionary = (
+		raw_current_task.duplicate(true)
+	)
+
+	if (
+		str(current_task.get("kind", ""))
+		== CITY_CITIZEN_TASK_KIND_NONE
+	):
+		return false
+	var stored_relocation_count := maxi(
+		int(current_task.get("relocation_count", 0)),
+		0
+	)
+	var resolved_relocation_count := relocation_count
+
+	if resolved_relocation_count < 0:
+		resolved_relocation_count = stored_relocation_count
+	if (
+		current_task.get(
+			"target_tile",
+			INVALID_CITY_TILE_POSITION
+		) == target_tile
+		and current_task.get(
+			"previous_target_tile",
+			INVALID_CITY_TILE_POSITION
+		) == previous_target_tile
+		and int(
+			current_task.get(
+				"next_action_world_minute",
+				INVALID_CITY_CITIZEN_TASK_ACTION_WORLD_MINUTE
+			)
+		) == next_action_world_minute
+		and stored_relocation_count == resolved_relocation_count
+	):
+		return true
+
+	current_task["target_tile"] = target_tile
+	current_task["previous_target_tile"] = (
+		previous_target_tile
+	)
+	current_task["next_action_world_minute"] = (
+		next_action_world_minute
+	)
+	current_task["relocation_count"] = (
+		resolved_relocation_count
+	)
+
+	citizen["current_task"] = current_task
+	city_citizens[citizen_index] = citizen
+	_mark_city_citizen_task_changed()
+
+	return true
+
+static func clear_city_citizen_task(
+	citizen_id: int,
+	requesting_source: String = CITY_CITIZEN_TASK_SOURCE_NONE
+) -> bool:
+	if not is_valid_city_citizen_task_source(
+		requesting_source
+	):
+		return false
+
+	var citizen_index := get_city_citizen_index_by_id(
+		citizen_id
+	)
+
+	if citizen_index < 0:
+		return false
+
+	var raw_citizen = city_citizens[citizen_index]
+
+	if not raw_citizen is Dictionary:
+		return false
+
+	var citizen: Dictionary = raw_citizen
+	var raw_current_task = citizen.get("current_task", {})
+
+	if raw_current_task is Dictionary:
+		var current_task: Dictionary = raw_current_task
+
+		if (
+			bool(current_task.get("player_locked", false))
+			and requesting_source
+			!= CITY_CITIZEN_TASK_SOURCE_PLAYER
+		):
+			return false
+
+	var empty_task := CityCitizensScript.make_city_citizen_task()
+
+	if (
+		raw_current_task is Dictionary
+		and raw_current_task == empty_task
+	):
+		return true
+
+	citizen["current_task"] = empty_task
+	city_citizens[citizen_index] = citizen
+	_remove_city_active_task_id(citizen_id)
+	_mark_city_citizen_task_changed()
+
+	return true
 
 static func is_valid_city_citizen_movement_state(
 	movement_state: String
@@ -2693,6 +3215,184 @@ static func get_city_object_worker_ids(city_object: Dictionary) -> Array:
 
 	return worker_ids
 
+static func _city_citizen_matches_workplace_attendance(
+	citizen: Dictionary,
+	workplace_id: int,
+	access_tiles: Array
+) -> bool:
+	if citizen.is_empty():
+		return false
+
+	if not bool(citizen.get("alive", false)):
+		return false
+
+	if int(citizen.get("job_object_id", -1)) != workplace_id:
+		return false
+
+	var raw_current_task = citizen.get("current_task", {})
+
+	if not raw_current_task is Dictionary:
+		return false
+
+	var current_task: Dictionary = raw_current_task
+
+	if (
+		str(current_task.get("kind", ""))
+		!= CITY_CITIZEN_TASK_KIND_WORK
+	):
+		return false
+
+	if (
+		str(current_task.get("phase", ""))
+		!= CITY_CITIZEN_TASK_PHASE_PERFORMING
+	):
+		return false
+
+	if (
+		int(current_task.get("target_object_id", -1))
+		!= workplace_id
+	):
+		return false
+
+	if (
+		str(citizen.get("movement_state", ""))
+		!= CITY_CITIZEN_MOVEMENT_STATE_IDLE
+	):
+		return false
+
+	var raw_tile_position = citizen.get(
+		"city_tile_position",
+		INVALID_CITY_TILE_POSITION
+	)
+
+	if not raw_tile_position is Vector2i:
+		return false
+
+	var citizen_tile: Vector2i = raw_tile_position
+	var raw_target_tile = current_task.get(
+		"target_tile",
+		INVALID_CITY_TILE_POSITION
+	)
+
+	if raw_target_tile is Vector2i:
+		var target_tile: Vector2i = raw_target_tile
+
+		if target_tile != INVALID_CITY_TILE_POSITION:
+			return citizen_tile == target_tile
+
+	return access_tiles.has(citizen_tile)
+
+static func is_city_citizen_attending_workplace(
+	citizen_id: int,
+	workplace_id: int,
+	source_world = null
+) -> bool:
+	if citizen_id <= 0 or workplace_id <= 0:
+		return false
+
+	var workplace := get_city_object_by_id(workplace_id)
+
+	if (
+		workplace.is_empty()
+		or not city_object_is_workplace(workplace)
+	):
+		return false
+
+	var city_world: WorldData = source_world
+
+	if city_world == null:
+		city_world = official_city_world
+
+	if city_world == null:
+		return false
+
+	var access_tiles := get_city_object_access_tiles(
+		city_world,
+		workplace
+	)
+
+	return _city_citizen_matches_workplace_attendance(
+		get_city_citizen_by_id(citizen_id),
+		workplace_id,
+		access_tiles
+	)
+
+static func get_city_object_attending_worker_ids(
+	city_object: Dictionary,
+	source_world = null
+) -> Array[int]:
+	var attending_worker_ids: Array[int] = []
+
+	if (
+		city_object.is_empty()
+		or not city_object_is_workplace(city_object)
+	):
+		return attending_worker_ids
+
+	var workplace_id := int(city_object.get("id", -1))
+	var worker_capacity := get_city_object_worker_capacity(
+		city_object
+	)
+
+	if workplace_id <= 0 or worker_capacity <= 0:
+		return attending_worker_ids
+
+	var city_world: WorldData = source_world
+
+	if city_world == null:
+		city_world = official_city_world
+
+	if city_world == null:
+		return attending_worker_ids
+
+	var access_tiles := get_city_object_access_tiles(
+		city_world,
+		city_object
+	)
+
+	if access_tiles.is_empty():
+		return attending_worker_ids
+
+	var counted_worker_ids: Dictionary = {}
+
+	for raw_worker_id in get_city_object_worker_ids(
+		city_object
+	):
+		var worker_id := int(raw_worker_id)
+
+		if worker_id <= 0:
+			continue
+
+		if counted_worker_ids.has(worker_id):
+			continue
+
+		counted_worker_ids[worker_id] = true
+
+		if not _city_citizen_matches_workplace_attendance(
+			get_city_citizen_by_id(worker_id),
+			workplace_id,
+			access_tiles
+		):
+			continue
+
+		attending_worker_ids.append(worker_id)
+
+	attending_worker_ids.sort()
+
+	if attending_worker_ids.size() > worker_capacity:
+		attending_worker_ids.resize(worker_capacity)
+
+	return attending_worker_ids
+
+
+static func get_city_object_attending_worker_count(
+	city_object: Dictionary,
+	source_world = null
+) -> int:
+	return get_city_object_attending_worker_ids(
+		city_object,
+		source_world
+	).size()
 
 static func get_city_object_worker_count(city_object: Dictionary) -> int:
 	return get_city_object_worker_ids(city_object).size()
@@ -3037,18 +3737,23 @@ static func is_city_tile_walkable_for_citizen(
 	):
 		return false
 
-	var occupying_object := get_city_object_at_tile(
-		tile_position
+	# Most city tiles are empty. Avoid allocating an empty Dictionary and
+	# performing an object-index lookup for every A* neighbor on those tiles.
+	if not city_occupied_tiles.has(tile_position):
+		return true
+
+	var object_id := int(
+		city_occupied_tiles.get(tile_position, -1)
 	)
+	var occupying_object := get_city_object_by_id(object_id)
 
 	if occupying_object.is_empty():
-		return true
+		return false
 
 	return (
 		str(occupying_object.get("type", ""))
 		== CITY_OBJECT_ROAD
 	)
-
 
 static func _sort_city_tiles_y_then_x(
 	tile_a: Vector2i,
@@ -3624,11 +4329,18 @@ static func run_simulation_tick(
 	minutes_advanced: int
 ) -> void:
 	# Simulation systems run here in deterministic order.
+	CitizenDecisionSystem.run_tick(
+		tick_index,
+		minutes_advanced
+	)
 	CitizenMovementSystem.run_tick(
 		tick_index,
 		minutes_advanced
 	)
-
+	CitizenTaskSystem.run_tick(
+		tick_index,
+		minutes_advanced
+	)
 	WorkplaceProductionSystem.run_tick(
 		tick_index,
 		minutes_advanced
@@ -3970,6 +4682,25 @@ static func remove_city_citizen_home(citizen_id: int) -> bool:
 
 	return true
 
+static func _clear_city_citizen_work_task_after_job_change(
+	citizen_id: int
+) -> void:
+	var current_task := get_city_citizen_current_task(
+		citizen_id
+	)
+
+	if (
+		str(current_task.get("kind", ""))
+		!= CITY_CITIZEN_TASK_KIND_WORK
+	):
+		return
+
+	clear_city_citizen_task(
+		citizen_id,
+		CITY_CITIZEN_TASK_SOURCE_PLAYER
+	)
+	cancel_city_citizen_movement(citizen_id)
+
 static func assign_city_citizen_job(
 	citizen_id: int,
 	workplace_id: int
@@ -4052,6 +4783,9 @@ static func assign_city_citizen_job(
 
 		if assignment_changed:
 			_mark_city_assignments_changed()
+			_clear_city_citizen_work_task_after_job_change(
+				citizen_id
+			)
 
 		return true
 
@@ -4118,5 +4852,8 @@ static func remove_city_citizen_job(citizen_id: int) -> bool:
 	city_citizens[citizen_index] = citizen
 
 	_mark_city_assignments_changed()
+	_clear_city_citizen_work_task_after_job_change(
+		citizen_id
+	)
 
 	return true

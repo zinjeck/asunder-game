@@ -14,8 +14,12 @@ const PATH_STATUS_RECONSTRUCTION_FAILED := (
 	"reconstruction_failed"
 )
 
-const DEFAULT_MAX_EXPANDED_NODES: int = 50_000
+const DEFAULT_MAX_EXPANDED_NODES: int = 10_000
 const MAXIMUM_PATH_COST: int = 1_000_000_000
+
+# Prefer reaching the goal promptly over proving that every route is the
+# mathematically shortest possible route.
+const HEURISTIC_WEIGHT: int = 2
 
 const HEAP_TILE_INDEX: int = 0
 const HEAP_TOTAL_COST_INDEX: int = 1
@@ -331,6 +335,15 @@ static func _get_minimum_manhattan_distance(
 	tile_position: Vector2i,
 	destination_tiles: Array
 ) -> int:
+	if destination_tiles.size() == 1:
+		var destination_tile: Vector2i = (
+			destination_tiles[0]
+		)
+
+		return (
+			absi(destination_tile.x - tile_position.x)
+			+ absi(destination_tile.y - tile_position.y)
+		)
 	var minimum_distance := MAXIMUM_PATH_COST
 
 	for destination_tile in destination_tiles:
@@ -361,7 +374,7 @@ static func _push_open_heap_entry(
 ) -> void:
 	var entry := [
 		tile_position,
-		travel_cost + heuristic,
+		travel_cost + heuristic * HEURISTIC_WEIGHT,
 		heuristic,
 		travel_cost
 	]

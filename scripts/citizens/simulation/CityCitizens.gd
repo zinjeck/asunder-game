@@ -13,6 +13,24 @@ const DEFAULT_CITIZEN_HUNGER := 100
 const DEFAULT_CITIZEN_HAPPINESS := 70
 const CITY_CITIZEN_STATE_IDLE := "idle"
 const INVALID_CITY_TILE_POSITION := Vector2i(-1, -1)
+# A task records why a citizen is acting. It remains separate from movement,
+# which records only how the citizen travels between tiles.
+const CITY_CITIZEN_TASK_KIND_NONE := "none"
+const CITY_CITIZEN_TASK_KIND_WORK := "work"
+
+const CITY_CITIZEN_TASK_SOURCE_NONE := "none"
+const CITY_CITIZEN_TASK_SOURCE_PLAYER := "player"
+const CITY_CITIZEN_TASK_SOURCE_SCHEDULE := "schedule"
+
+const CITY_CITIZEN_TASK_PHASE_NONE := "none"
+const CITY_CITIZEN_TASK_PHASE_PENDING := "pending"
+const CITY_CITIZEN_TASK_PHASE_TRAVELING := "traveling"
+const CITY_CITIZEN_TASK_PHASE_PERFORMING := "performing"
+const CITY_CITIZEN_TASK_PHASE_BLOCKED := "blocked"
+
+const CITY_CITIZEN_TASK_PRIORITY_NONE := 0
+const INVALID_CITY_CITIZEN_TASK_START_WORLD_MINUTE := -1
+const INVALID_CITY_CITIZEN_TASK_ACTION_WORLD_MINUTE := -1
 # High-level citizen state and movement state intentionally remain separate.
 # A citizen may later be working, hauling, or eating while its movement state
 # independently describes whether it is walking between authoritative tiles.
@@ -30,7 +48,7 @@ const CITY_CITIZEN_MOVEMENT_FAILURE_REPATH_FAILED := (
 )
 
 const CITY_CITIZEN_MOVEMENT_PROGRESS_PER_TILE := 10_000
-const DEFAULT_CITIZEN_MOVEMENT_SPEED_PER_MINUTE := 2_000
+const DEFAULT_CITIZEN_MOVEMENT_SPEED_PER_MINUTE := 4_167
 const MAX_CITIZEN_MOVEMENT_REPATH_ATTEMPTS := 3
 
 static var city_citizen_male_name_pool: Array[String] = [
@@ -119,6 +137,143 @@ static var city_citizen_female_name_pool: Array[String] = [
 	"Ysara",
 ]
 static var city_citizen_unassigned_name_pool: Array[String] = []
+
+static func get_city_citizen_task_kind_types() -> Array[String]:
+	return [
+		CITY_CITIZEN_TASK_KIND_NONE,
+		CITY_CITIZEN_TASK_KIND_WORK
+	]
+
+
+static func is_valid_city_citizen_task_kind(
+	task_kind: String
+) -> bool:
+	return get_city_citizen_task_kind_types().has(task_kind)
+
+
+static func get_city_citizen_task_source_types() -> Array[String]:
+	return [
+		CITY_CITIZEN_TASK_SOURCE_NONE,
+		CITY_CITIZEN_TASK_SOURCE_PLAYER,
+		CITY_CITIZEN_TASK_SOURCE_SCHEDULE
+	]
+
+
+static func is_valid_city_citizen_task_source(
+	task_source: String
+) -> bool:
+	return get_city_citizen_task_source_types().has(task_source)
+
+
+static func get_city_citizen_task_phase_types() -> Array[String]:
+	return [
+		CITY_CITIZEN_TASK_PHASE_NONE,
+		CITY_CITIZEN_TASK_PHASE_PENDING,
+		CITY_CITIZEN_TASK_PHASE_TRAVELING,
+		CITY_CITIZEN_TASK_PHASE_PERFORMING,
+		CITY_CITIZEN_TASK_PHASE_BLOCKED
+	]
+
+
+static func is_valid_city_citizen_task_phase(
+	task_phase: String
+) -> bool:
+	return get_city_citizen_task_phase_types().has(task_phase)
+
+
+static func make_city_citizen_task(
+	values: Dictionary = {}
+) -> Dictionary:
+	return {
+		"kind": str(
+			values.get(
+				"kind",
+				CITY_CITIZEN_TASK_KIND_NONE
+			)
+		),
+		"source": str(
+			values.get(
+				"source",
+				CITY_CITIZEN_TASK_SOURCE_NONE
+			)
+		),
+		"phase": str(
+			values.get(
+				"phase",
+				CITY_CITIZEN_TASK_PHASE_NONE
+			)
+		),
+		"priority": int(
+			values.get(
+				"priority",
+				CITY_CITIZEN_TASK_PRIORITY_NONE
+			)
+		),
+		"target_object_id": int(
+			values.get("target_object_id", -1)
+		),
+		"start_world_minute": int(
+			values.get(
+				"start_world_minute",
+				INVALID_CITY_CITIZEN_TASK_START_WORLD_MINUTE
+			)
+		),
+		"target_tile": values.get(
+			"target_tile",
+			INVALID_CITY_TILE_POSITION
+		),
+		"previous_target_tile": values.get(
+			"previous_target_tile",
+			INVALID_CITY_TILE_POSITION
+		),
+		"next_action_world_minute": int(
+			values.get(
+				"next_action_world_minute",
+				INVALID_CITY_CITIZEN_TASK_ACTION_WORLD_MINUTE
+			)
+		),
+		"relocation_count": maxi(
+			int(values.get("relocation_count", 0)),
+			0
+		),
+		"player_locked": bool(
+			values.get("player_locked", false)
+		)
+	}
+
+
+static func has_complete_city_citizen_task_state(
+	citizen: Dictionary
+) -> bool:
+	if not citizen.has("current_task"):
+		return false
+
+	var raw_current_task = citizen.get("current_task")
+
+	if not raw_current_task is Dictionary:
+		return false
+
+	var current_task: Dictionary = raw_current_task
+
+	return (
+		current_task.has("kind")
+		and current_task.has("source")
+		and current_task.has("phase")
+		and current_task.has("priority")
+		and current_task.has("target_object_id")
+		and current_task.has("start_world_minute")
+		and current_task.has("target_tile")
+		and current_task.has("previous_target_tile")
+		and current_task.has("next_action_world_minute")
+		and current_task.has("relocation_count")
+		and current_task.has("player_locked")
+	)
+
+
+static func reset_city_citizen_task_state(
+	citizen: Dictionary
+) -> void:
+	citizen["current_task"] = make_city_citizen_task()
 
 static func get_city_citizen_movement_state_types() -> Array[String]:
 	return [
@@ -503,5 +658,6 @@ static func make_city_citizen(
 		"inventory": inventory
 	}
 
+	reset_city_citizen_task_state(citizen)
 	reset_city_citizen_movement_state(citizen)
 	return citizen

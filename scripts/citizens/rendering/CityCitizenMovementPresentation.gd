@@ -125,14 +125,18 @@ func update(delta: float) -> bool:
 	if simulation_speed <= 0.0:
 		return false
 
-	var real_seconds_per_tick: float = maxf(
-		SimulationClock.real_seconds_per_tick,
-		0.001
+	var world_minutes_per_real_second: float = (
+		float(SimulationClock.minutes_per_tick)
+		/ maxf(
+			SimulationClock.real_seconds_per_tick,
+			0.001
+		)
 	)
-	var base_progress_delta: float = (
-		delta
-		* simulation_speed
-		/ real_seconds_per_tick
+	var movement_progress_per_tile: float = maxf(
+		float(
+			WorldData.CITY_CITIZEN_MOVEMENT_PROGRESS_PER_TILE
+		),
+		1.0
 	)
 	var visual_state_changed: bool = false
 
@@ -166,9 +170,28 @@ func update(delta: float) -> bool:
 			float(transition.get("tile_distance", 1.0)),
 			1.0
 		)
+		var movement_speed: float = maxf(
+			float(
+				transition.get(
+					"movement_speed_basis_points_per_minute",
+					WorldData.DEFAULT_CITIZEN_MOVEMENT_SPEED_PER_MINUTE
+				)
+			),
+			1.0
+		)
+		var tiles_per_real_second: float = (
+			movement_speed
+			* world_minutes_per_real_second
+			/ movement_progress_per_tile
+		)
 		var progress: float = clampf(
 			float(transition.get("progress", 0.0))
-			+ base_progress_delta / tile_distance,
+			+ (
+				delta
+				* simulation_speed
+				* tiles_per_real_second
+				/ tile_distance
+			),
 			0.0,
 			1.0
 		)
@@ -318,11 +341,24 @@ func _synchronize_citizen_position(
 		_release_mover_if_inactive(citizen_id)
 		return
 
+	var movement_speed := maxi(
+		int(
+			citizen.get(
+				"movement_speed_basis_points_per_minute",
+				WorldData.DEFAULT_CITIZEN_MOVEMENT_SPEED_PER_MINUTE
+			)
+		),
+		1
+	)
+
 	transition_by_citizen_id[citizen_id] = {
 		"from_tile": visual_from_tile,
 		"to_tile": visual_to_tile,
 		"progress": 0.0,
-		"tile_distance": maxf(tile_distance, 1.0)
+		"tile_distance": maxf(tile_distance, 1.0),
+		"movement_speed_basis_points_per_minute": (
+			movement_speed
+		)
 	}
 	tracked_mover_id_lookup[citizen_id] = true
 

@@ -725,51 +725,12 @@ static func _run_workplace_tick(
 		site_productivity
 	)
 
-
 static func _get_productive_worker_count(
 	city_object: Dictionary
 ) -> int:
-	var workplace_id := int(city_object.get("id", -1))
-
-	if workplace_id <= 0:
-		return 0
-
-	var productive_worker_count := 0
-	var counted_worker_ids: Dictionary = {}
-
-	for raw_worker_id in WorldData.get_city_object_worker_ids(
+	return WorldData.get_city_object_attending_worker_count(
 		city_object
-	):
-		var worker_id := int(raw_worker_id)
-
-		if worker_id <= 0:
-			continue
-
-		if counted_worker_ids.has(worker_id):
-			continue
-
-		counted_worker_ids[worker_id] = true
-
-		var citizen := WorldData.get_city_citizen_by_id(
-			worker_id
-		)
-
-		if citizen.is_empty():
-			continue
-
-		if not bool(citizen.get("alive", false)):
-			continue
-
-		if int(citizen.get("job_object_id", -1)) != workplace_id:
-			continue
-
-		productive_worker_count += 1
-
-	return mini(
-		productive_worker_count,
-		WorldData.get_city_object_worker_capacity(city_object)
 	)
-
 
 static func _get_recipe_outputs(
 	recipe: Dictionary
