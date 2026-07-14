@@ -1,21 +1,25 @@
 extends RefCounted
 class_name DebugPanel
+
 signal panel_moved(new_position: Vector2)
+signal minimized_changed(is_minimized: bool)
 
 var canvas_layer: CanvasLayer
 var panel: Panel
 var label: Label
-
+var minimize_button: Button
 var panel_padding: Vector2 = Vector2(12.0, 10.0)
 var panel_min_size: Vector2 = Vector2(260.0, 80.0)
 var text_provider: Callable
 
 const MINIMUM_GRABBABLE_WIDTH: float = 72.0
 const MINIMUM_GRABBABLE_HEIGHT: float = 24.0
-
+const MINIMIZE_BUTTON_SIZE: Vector2 = Vector2(26.0, 24.0)
+var is_minimized: bool = false
 var _is_dragging: bool = false
 var _drag_offset: Vector2 = Vector2.ZERO
 var _base_position: Vector2 = Vector2.ZERO
+var _expanded_size: Vector2 = Vector2.ZERO
 
 func setup(
 	parent: Node,
@@ -39,6 +43,7 @@ func setup(
 	_base_position = panel_position
 	panel.position = _base_position
 	panel.visible = WorldData.debug_mode_enabled
+	panel.clip_contents = true
 	panel.mouse_filter = Control.MOUSE_FILTER_PASS
 	panel.mouse_default_cursor_shape = Control.CURSOR_MOVE
 	panel.gui_input.connect(Callable(self, "_on_panel_gui_input"))
@@ -62,6 +67,7 @@ func setup(
 	label.text = initial_text
 
 	panel.add_child(label)
+	_create_minimize_button()
 	fit_to_text()
 	refresh()
 
@@ -107,7 +113,10 @@ func fit_to_text() -> void:
 		return
 
 	var label_size: Vector2 = label.get_combined_minimum_size()
-	var next_panel_size: Vector2 = label_size + panel_padding * 2.0
+	var next_panel_size: Vector2 = (
+		label_size
+		+ panel_padding * 2.0
+	)
 
 	if next_panel_size.x < panel_min_size.x:
 		next_panel_size.x = panel_min_size.x
@@ -115,9 +124,167 @@ func fit_to_text() -> void:
 	if next_panel_size.y < panel_min_size.y:
 		next_panel_size.y = panel_min_size.y
 
+	if is_minimized:
+		panel.size = Vector2(
+			maxf(
+				_expanded_size.x,
+				panel_min_size.x
+			),
+			MINIMIZE_BUTTON_SIZE.y
+		)
+		_layout_minimize_button()
+		return
+
 	panel.size = next_panel_size
+	_expanded_size = next_panel_size
 	label.position = panel_padding
 	label.size = label_size
+	_layout_minimize_button()
+
+func set_minimized(
+	should_minimize: bool
+) -> void:
+	if panel == null:
+		return
+
+	if is_minimized == should_minimize:
+		return
+
+	_is_dragging = false
+
+	if should_minimize:
+		_expanded_size = panel.size
+
+	is_minimized = should_minimize
+	label.visible = not is_minimized
+
+	if minimize_button != null:
+		if is_minimized:
+			minimize_button.text = "+"
+			minimize_button.tooltip_text = (
+				"Expand debug panel"
+			)
+		else:
+			minimize_button.text = "-"
+			minimize_button.tooltip_text = (
+				"Minimize debug panel"
+			)
+
+	fit_to_text()
+	minimized_changed.emit(is_minimized)
+
+
+func _create_minimize_button() -> void:
+	if panel == null:
+		return
+
+	minimize_button = Button.new()
+	minimize_button.text = "-"
+	minimize_button.size = MINIMIZE_BUTTON_SIZE
+	minimize_button.focus_mode = Control.FOCUS_NONE
+	minimize_button.mouse_filter = (
+		Control.MOUSE_FILTER_STOP
+	)
+	minimize_button.mouse_default_cursor_shape = (
+		Control.CURSOR_POINTING_HAND
+	)
+	minimize_button.tooltip_text = (
+		"Minimize debug panel"
+	)
+	minimize_button.add_theme_font_size_override(
+		"font_size",
+		15
+	)
+	minimize_button.add_theme_color_override(
+		"font_color",
+		Color(0.82, 0.94, 1.0, 1.0)
+	)
+
+	var normal_style := StyleBoxFlat.new()
+	normal_style.bg_color = Color(
+		0.03,
+		0.12,
+		0.20,
+		0.92
+	)
+	normal_style.border_color = Color(
+		0.0,
+		0.55,
+		1.0,
+		0.70
+	)
+	normal_style.set_border_width_all(1)
+	normal_style.set_corner_radius_all(4)
+
+	var hover_style := (
+		normal_style.duplicate()
+		as StyleBoxFlat
+	)
+	hover_style.bg_color = Color(
+		0.04,
+		0.24,
+		0.38,
+		0.96
+	)
+
+	var pressed_style := (
+		normal_style.duplicate()
+		as StyleBoxFlat
+	)
+	pressed_style.bg_color = Color(
+		0.0,
+		0.36,
+		0.58,
+		1.0
+	)
+
+	minimize_button.add_theme_stylebox_override(
+		"normal",
+		normal_style
+	)
+	minimize_button.add_theme_stylebox_override(
+		"hover",
+		hover_style
+	)
+	minimize_button.add_theme_stylebox_override(
+		"pressed",
+		pressed_style
+	)
+	minimize_button.add_theme_stylebox_override(
+		"focus",
+		hover_style
+	)
+
+	minimize_button.pressed.connect(
+		Callable(
+			self,
+			"_on_minimize_button_pressed"
+		)
+	)
+
+	panel.add_child(minimize_button)
+
+
+func _layout_minimize_button() -> void:
+	if (
+		panel == null
+		or minimize_button == null
+	):
+		return
+
+	minimize_button.position = Vector2(
+		panel.size.x
+		- MINIMIZE_BUTTON_SIZE.x,
+		0.0
+	)
+	minimize_button.size = (
+		MINIMIZE_BUTTON_SIZE
+	)
+	minimize_button.move_to_front()
+
+
+func _on_minimize_button_pressed() -> void:
+	set_minimized(not is_minimized)
 
 func _on_panel_gui_input(event: InputEvent) -> void:
 	if panel == null:
@@ -128,7 +295,16 @@ func _on_panel_gui_input(event: InputEvent) -> void:
 
 		if mouse_button_event.button_index != MOUSE_BUTTON_LEFT:
 			return
-
+		if (
+			minimize_button != null
+			and Rect2(
+				minimize_button.position,
+				minimize_button.size
+			).has_point(
+				mouse_button_event.position
+			)
+		):
+			return
 		if mouse_button_event.pressed:
 			_is_dragging = true
 			_drag_offset = mouse_button_event.position

@@ -57,6 +57,9 @@ var debug_navigation_candidate_count: int = 0
 var debug_navigation_expanded_nodes: int = 0
 var debug_navigation_path_cost: int = 0
 var debug_navigation_duration_usec: int = 0
+var debug_selected_city_tile: Vector2i = (
+	WorldData.INVALID_CITY_TILE_POSITION
+)
 var citizen_debug_button: Button
 var citizen_debug_panel: Panel
 var citizen_debug_title_label: Label
@@ -190,6 +193,9 @@ const DEBUG_NAVIGATION_PATH_FILL_COLOR: Color = (
 )
 const DEBUG_NAVIGATION_PATH_LINE_COLOR: Color = (
 	Color(1.0, 0.95, 0.20, 0.92)
+)
+const DEBUG_SELECTED_TILE_HIGHLIGHT_COLOR: Color = (
+	Color(0.0, 1.0, 1.0, 1.0)
 )
 
 func _ready() -> void:
@@ -392,6 +398,7 @@ func _process(delta: float) -> void:
 	if (
 		city_objects_changed
 		or city_citizens_changed
+		or city_citizen_spatial_changed
 		or city_assignments_changed
 		or city_tile_data_changed
 		or city_citizen_movement_changed
@@ -496,8 +503,20 @@ func _input(event: InputEvent) -> void:
 				get_viewport().set_input_as_handled()
 				return
 
+			var cleared_any_selection := false
+
 			if has_selected_city_entity():
 				clear_selected_city_entity()
+				cleared_any_selection = true
+
+			if (
+				WorldData.debug_mode_enabled
+				and has_debug_selected_city_tile()
+			):
+				clear_debug_selected_city_tile()
+				cleared_any_selection = true
+
+			if cleared_any_selection:
 				get_viewport().set_input_as_handled()
 				return
 
@@ -2819,6 +2838,11 @@ func select_city_entity_under_mouse() -> void:
 		clear_selected_city_entity()
 		return
 
+	if WorldData.debug_mode_enabled:
+		set_debug_selected_city_tile(
+			tile_position
+		)
+
 	var mouse_world_position := (
 		get_global_mouse_position()
 	)
@@ -2917,6 +2941,56 @@ func has_selected_city_entity() -> bool:
 		and selected_city_entity_id >= 0
 	)
 
+func has_debug_selected_city_tile() -> bool:
+	if city_world == null:
+		return false
+
+	if (
+		debug_selected_city_tile
+		== WorldData.INVALID_CITY_TILE_POSITION
+	):
+		return false
+
+	return city_world.is_in_bounds(
+		debug_selected_city_tile.x,
+		debug_selected_city_tile.y
+	)
+
+
+func set_debug_selected_city_tile(
+	tile_position: Vector2i
+) -> void:
+	if not WorldData.debug_mode_enabled:
+		return
+
+	if city_world == null:
+		return
+
+	if not city_world.is_in_bounds(
+		tile_position.x,
+		tile_position.y
+	):
+		return
+
+	if debug_selected_city_tile == tile_position:
+		return
+
+	debug_selected_city_tile = tile_position
+	clear_debug_navigation_result()
+	update_debug_panel_text()
+	queue_redraw()
+
+
+func clear_debug_selected_city_tile() -> void:
+	if not has_debug_selected_city_tile():
+		return
+
+	debug_selected_city_tile = (
+		WorldData.INVALID_CITY_TILE_POSITION
+	)
+	clear_debug_navigation_result()
+	update_debug_panel_text()
+	queue_redraw()
 
 func set_selected_city_entity(
 	selection_kind: String,
@@ -2963,6 +3037,12 @@ func set_selected_city_entity(
 		update_selected_entity_panel()
 		return
 
+	if (
+		WorldData.debug_mode_enabled
+		and has_debug_selected_city_tile()
+	):
+		clear_debug_navigation_result()
+
 	selected_city_entity_kind = selection_kind
 	selected_city_entity_id = entity_id
 
@@ -2993,7 +3073,11 @@ func clear_selected_city_entity() -> void:
 	if not has_selected_city_entity():
 		update_selected_entity_panel()
 		return
-
+	if (
+		WorldData.debug_mode_enabled
+		and has_debug_selected_city_tile()
+	):
+		clear_debug_navigation_result()
 	selected_city_entity_kind = (
 		CITY_SELECTION_KIND_NONE
 	)
@@ -3452,6 +3536,7 @@ func _draw() -> void:
 	draw_city_roads()
 	draw_debug_navigation_path()
 	draw_city_citizens()
+	draw_debug_selected_city_tile_highlight()
 	draw_selected_city_object_highlight()
 	draw_selected_city_citizen_highlight()
 	draw_hovered_city_tile_highlight()
@@ -4620,6 +4705,37 @@ func draw_selected_city_citizen_highlight() -> void:
 		2.0
 	)
 
+func draw_debug_selected_city_tile_highlight() -> void:
+	if not WorldData.debug_mode_enabled:
+		return
+
+	if not has_debug_selected_city_tile():
+		return
+
+	var tile_rect := Rect2(
+		Vector2(
+			float(
+				debug_selected_city_tile.x
+				* city_tile_size
+			),
+			float(
+				debug_selected_city_tile.y
+				* city_tile_size
+			)
+		),
+		Vector2(
+			float(city_tile_size),
+			float(city_tile_size)
+		)
+	)
+
+	draw_screen_constant_inset_rect_border(
+		tile_rect,
+		DEBUG_SELECTED_TILE_HIGHLIGHT_COLOR,
+		0.0,
+		2.0
+	)
+
 func draw_selected_city_object_highlight() -> void:
 	if selected_city_object_id == null:
 		return
@@ -4840,7 +4956,15 @@ func draw_road_preview() -> void:
 func draw_hovered_city_tile_highlight() -> void:
 	if hovered_city_tile == Vector2i(-1, -1):
 		return
-		
+
+	if (
+		WorldData.debug_mode_enabled
+		and has_debug_selected_city_tile()
+		and hovered_city_tile
+		== debug_selected_city_tile
+	):
+		return
+
 	if is_object_selection_dragging:
 		return
 		
@@ -5050,7 +5174,17 @@ func create_debug_panel() -> void:
 		debug_panel_ui.panel_moved.connect(
 			panel_moved_callable
 		)
+	var minimized_changed_callable := Callable(
+		self,
+		"on_debug_panel_minimized_changed"
+	)
 
+	if not debug_panel_ui.minimized_changed.is_connected(
+		minimized_changed_callable
+	):
+		debug_panel_ui.minimized_changed.connect(
+			minimized_changed_callable
+		)
 	create_citizen_debug_button()
 	create_citizen_debug_list_panel()
 	update_citizen_debug_ui()
@@ -5058,6 +5192,12 @@ func create_debug_panel() -> void:
 func on_debug_panel_moved(
 	_new_position: Vector2
 ) -> void:
+	layout_citizen_debug_list_panel()
+
+func on_debug_panel_minimized_changed(
+	_is_minimized: bool
+) -> void:
+	update_citizen_debug_ui()
 	layout_citizen_debug_list_panel()
 
 func create_citizen_debug_button() -> void:
@@ -5131,16 +5271,29 @@ func toggle_citizen_debug_list_panel() -> void:
 
 
 func update_citizen_debug_ui() -> void:
+	var is_debug_panel_expanded := (
+		WorldData.debug_mode_enabled
+		and debug_panel_ui != null
+		and not debug_panel_ui.is_minimized
+	)
+
 	if citizen_debug_button != null:
-		citizen_debug_button.visible = WorldData.debug_mode_enabled
+		citizen_debug_button.visible = (
+			is_debug_panel_expanded
+		)
 
 		if is_citizen_debug_panel_open:
-			citizen_debug_button.text = "Hide Citizens"
+			citizen_debug_button.text = (
+				"Hide Citizens"
+			)
 		else:
 			citizen_debug_button.text = "Citizens"
 
 	if citizen_debug_panel != null:
-		citizen_debug_panel.visible = WorldData.debug_mode_enabled and is_citizen_debug_panel_open
+		citizen_debug_panel.visible = (
+			is_debug_panel_expanded
+			and is_citizen_debug_panel_open
+		)
 
 		if citizen_debug_panel.visible:
 			layout_citizen_debug_list_panel()
@@ -5247,8 +5400,12 @@ func get_debug_navigation_source_citizen() -> Dictionary:
 
 	return get_first_living_debug_citizen()
 
-func request_debug_navigation_path() -> void:
+func clear_debug_navigation_result() -> void:
 	debug_navigation_path.clear()
+	debug_navigation_status = (
+		CityNavigationSystemScript
+		.PATH_STATUS_NOT_REQUESTED
+	)
 	debug_navigation_start_tile = (
 		WorldData.INVALID_CITY_TILE_POSITION
 	)
@@ -5259,6 +5416,9 @@ func request_debug_navigation_path() -> void:
 	debug_navigation_expanded_nodes = 0
 	debug_navigation_path_cost = 0
 	debug_navigation_duration_usec = 0
+
+func request_debug_navigation_path() -> void:
+	clear_debug_navigation_result()
 
 	if city_world == null:
 		debug_navigation_status = (
@@ -5298,6 +5458,8 @@ func request_debug_navigation_path() -> void:
 
 	var start_tile: Vector2i = raw_start_tile
 	var target_tile := hovered_city_tile
+	if has_debug_selected_city_tile():
+		target_tile = debug_selected_city_tile
 	var destination_tiles := []
 
 	if target_tile == Vector2i(-1, -1):
@@ -5473,7 +5635,7 @@ func get_navigation_debug_text() -> String:
 		.PATH_STATUS_NOT_REQUESTED
 	):
 		return (
-			"Navigation Test: hover a tile or building "
+			"Navigation Test: select or hover a tile/building "
 			+ "and press P"
 		)
 
@@ -5686,78 +5848,257 @@ func get_city_debug_panel_text() -> String:
 		+ simulation_text
 		+ "\n\n"
 		+ "Scene: City\n"
-		+ "View: " + get_city_map_mode_name(city_view_mode) + "\n"
-		+ "Seed: " + str(city_seed) + "\n"
+		+ "View: "
+		+ get_city_map_mode_name(city_view_mode)
 		+ "\n"
+		+ "Seed: "
+		+ str(city_seed)
+		+ "\n\n"
 	)
 
-	if hovered_city_tile == Vector2i(-1, -1):
+	var inspected_tile := hovered_city_tile
+	var inspector_source := "Cursor hover"
+
+	if has_debug_selected_city_tile():
+		inspected_tile = debug_selected_city_tile
+		inspector_source = "Debug selection"
+
+	var cursor_text := "Outside city"
+
+	if hovered_city_tile != Vector2i(-1, -1):
+		cursor_text = (
+			str(hovered_city_tile.x)
+			+ ", "
+			+ str(hovered_city_tile.y)
+		)
+
+	if inspected_tile == Vector2i(-1, -1):
 		return (
 			base_text
-			+ "Cursor: Outside city\n"
-			+ "Tile: none\n"
+			+ "Cursor: "
+			+ cursor_text
 			+ "\n"
+			+ "Inspector: "
+			+ inspector_source
+			+ "\n"
+			+ "Tile: none\n\n"
 			+ get_city_debug_selection_text()
 		)
 
-	var tile: Dictionary = city_world.get_tile(hovered_city_tile.x, hovered_city_tile.y)
+	var tile: Dictionary = city_world.get_tile(
+		inspected_tile.x,
+		inspected_tile.y
+	)
 
 	var fertility_text := "N/A"
-	var fertility: float = float(tile.get("fertility", -1.0))
+	var fertility := float(
+		tile.get("fertility", -1.0)
+	)
 
 	if fertility >= 0.0:
 		fertility_text = "%.1f" % fertility
 
-	var city_object := WorldData.get_city_object_at_tile(hovered_city_tile)
-
-	var object_text := get_city_debug_object_text(city_object)
+	var city_object := (
+		WorldData.get_city_object_at_tile(
+			inspected_tile
+		)
+	)
 
 	return (
 		base_text
-		+ "Cursor: City map\n"
-		+ "Tile: " + str(hovered_city_tile.x) + ", " + str(hovered_city_tile.y) + "\n"
-		+ "Terrain: " + str(tile.get("terrain", "unknown")) + "\n"
-		+ "Biome: " + str(tile.get("biome", "unknown")) + "\n"
-		+ "Resource: " + str(tile.get("resource", "none")) + "\n"
+		+ "Cursor: "
+		+ cursor_text
 		+ "\n"
-		+ "Elevation: " + "%.3f" % float(tile.get("elevation", 0.0)) + "\n"
-		+ "Temperature: " + "%.3f" % float(tile.get("temperature", 0.0)) + "\n"
-		+ "Precipitation: " + "%.3f" % float(tile.get("precipitation", 0.0)) + "\n"
-		+ "Fertility: " + fertility_text + "\n"
+		+ "Inspector: "
+		+ inspector_source
 		+ "\n"
-		+ "Land: " + DebugPanel.bool_to_yes_no(bool(tile.get("is_land", false))) + "\n"
-		+ "Buildable 1x1: " + DebugPanel.bool_to_yes_no(WorldData.can_place_city_object(city_world, hovered_city_tile, Vector2i(1, 1))) + "\n"
-		+ "Road placeable: " + DebugPanel.bool_to_yes_no(WorldData.can_place_city_road_tile(city_world, hovered_city_tile)) + "\n"
+		+ "Tile: "
+		+ str(inspected_tile.x)
+		+ ", "
+		+ str(inspected_tile.y)
 		+ "\n"
-		+ object_text
+		+ "Terrain: "
+		+ str(tile.get("terrain", "unknown"))
+		+ "\n"
+		+ "Biome: "
+		+ str(tile.get("biome", "unknown"))
+		+ "\n"
+		+ "Resource: "
+		+ str(tile.get("resource", "none"))
+		+ "\n\n"
+		+ "Elevation: "
+		+ "%.3f"
+		% float(tile.get("elevation", 0.0))
+		+ "\n"
+		+ "Temperature: "
+		+ "%.3f"
+		% float(tile.get("temperature", 0.0))
+		+ "\n"
+		+ "Precipitation: "
+		+ "%.3f"
+		% float(tile.get("precipitation", 0.0))
+		+ "\n"
+		+ "Fertility: "
+		+ fertility_text
+		+ "\n\n"
+		+ "Land: "
+		+ DebugPanel.bool_to_yes_no(
+			bool(tile.get("is_land", false))
+		)
+		+ "\n"
+		+ "Walkable: "
+		+ DebugPanel.bool_to_yes_no(
+			WorldData.is_city_tile_walkable_for_citizen(
+				city_world,
+				inspected_tile
+			)
+		)
+		+ "\n"
+		+ "Buildable 1x1: "
+		+ DebugPanel.bool_to_yes_no(
+			WorldData.can_place_city_object(
+				city_world,
+				inspected_tile,
+				Vector2i(1, 1)
+			)
+		)
+		+ "\n"
+		+ "Road placeable: "
+		+ DebugPanel.bool_to_yes_no(
+			WorldData.can_place_city_road_tile(
+				city_world,
+				inspected_tile
+			)
+		)
+		+ "\n\n"
+		+ get_city_debug_object_text(
+			city_object
+		)
+		+ get_city_debug_tile_citizen_text(
+			inspected_tile
+		)
 		+ "\n"
 		+ get_city_debug_selection_text()
 	)
 
-
-func get_city_debug_object_text(city_object: Dictionary) -> String:
+func get_city_debug_object_text(
+	city_object: Dictionary
+) -> String:
 	if city_object.is_empty():
-		return "Object under cursor: none\n"
+		return (
+			"Object on tile: none\n"
+			+ "Workplace: No\n"
+		)
 
-	var object_type: String = str(city_object.get("type", "unknown"))
-	var top_left: Vector2i = city_object.get("top_left", Vector2i(-1, -1))
-	var size_tiles: Vector2i = city_object.get("size", Vector2i.ZERO)
-
+	var object_type := str(
+		city_object.get("type", "unknown")
+	)
+	var top_left: Vector2i = city_object.get(
+		"top_left",
+		Vector2i(-1, -1)
+	)
+	var size_tiles: Vector2i = city_object.get(
+		"size",
+		Vector2i.ZERO
+	)
 	var object_id_text := "N/A"
 
 	if city_object.has("id"):
 		object_id_text = str(city_object["id"])
 
-	var container_type := WorldData.get_city_object_container_type(city_object)
+	var container_type := (
+		WorldData.get_city_object_container_type(
+			city_object
+		)
+	)
 
 	return (
-		"Object under cursor: " + get_city_object_display_name(city_object) + "\n"
-		+ "Object type: " + object_type + "\n"
-		+ "Object id: " + object_id_text + "\n"
-		+ "Owner: " + str(city_object.get("owner", "none")) + "\n"
-		+ "Container: " + get_container_type_display_name(container_type) + "\n"
-		+ "Object pos: " + str(top_left.x) + ", " + str(top_left.y) + "\n"
-		+ "Object size: " + str(size_tiles.x) + " x " + str(size_tiles.y) + "\n"
+		"Object on tile: "
+		+ get_city_object_display_name(
+			city_object
+		)
+		+ "\n"
+		+ "Object type: "
+		+ object_type
+		+ "\n"
+		+ "Object id: "
+		+ object_id_text
+		+ "\n"
+		+ "Workplace: "
+		+ DebugPanel.bool_to_yes_no(
+			WorldData.city_object_is_workplace(
+				city_object
+			)
+		)
+		+ "\n"
+		+ "Owner: "
+		+ str(city_object.get("owner", "none"))
+		+ "\n"
+		+ "Container: "
+		+ get_container_type_display_name(
+			container_type
+		)
+		+ "\n"
+		+ "Object pos: "
+		+ str(top_left.x)
+		+ ", "
+		+ str(top_left.y)
+		+ "\n"
+		+ "Object size: "
+		+ str(size_tiles.x)
+		+ " x "
+		+ str(size_tiles.y)
+		+ "\n"
+	)
+
+func get_city_debug_tile_citizen_text(
+	tile_position: Vector2i
+) -> String:
+	var standing_ids := (
+		WorldData.get_city_citizen_ids_at_tile(
+			tile_position
+		)
+	)
+	var claiming_ids := []
+	var claim_text := "select a debug tile"
+
+	if (
+		has_debug_selected_city_tile()
+		and tile_position
+		== debug_selected_city_tile
+	):
+		for citizen_id in (
+			WorldData
+			.get_city_active_task_ids_snapshot()
+		):
+			var current_task := (
+				WorldData
+				.get_city_citizen_current_task(
+					citizen_id
+				)
+			)
+
+			if (
+				current_task.get(
+					"target_tile",
+					WorldData
+					.INVALID_CITY_TILE_POSITION
+				)
+				== tile_position
+			):
+				claiming_ids.append(
+					citizen_id
+				)
+
+		claim_text = str(claiming_ids)
+
+	return (
+		"Citizen IDs standing here: "
+		+ str(standing_ids)
+		+ "\n"
+		+ "Citizen task claims: "
+		+ claim_text
+		+ "\n"
 	)
 
 func get_city_debug_selection_text() -> String:
@@ -5777,17 +6118,114 @@ func get_city_debug_selection_text() -> String:
 		if citizen.is_empty():
 			return "Selected citizen: missing\n"
 
+		var current_task := (
+			WorldData.get_city_citizen_current_task(
+				selected_city_citizen_id
+			)
+		)
+		var task_target_text := "none"
+		var raw_task_target = current_task.get(
+			"target_tile",
+			WorldData.INVALID_CITY_TILE_POSITION
+		)
+
+		if (
+			raw_task_target is Vector2i
+			and raw_task_target
+			!= WorldData.INVALID_CITY_TILE_POSITION
+		):
+			task_target_text = str(
+				raw_task_target
+			)
+
+		var movement_destination_text := "none"
+		var raw_destination = citizen.get(
+			"movement_destination_tile",
+			WorldData.INVALID_CITY_TILE_POSITION
+		)
+
+		if (
+			raw_destination is Vector2i
+			and raw_destination
+			!= WorldData.INVALID_CITY_TILE_POSITION
+		):
+			movement_destination_text = str(
+				raw_destination
+			)
+
+		var failure_text := str(
+			citizen.get(
+				"movement_failure_reason",
+				WorldData
+					.CITY_CITIZEN_MOVEMENT_FAILURE_NONE
+			)
+		)
+		var task_phase := str(
+			current_task.get(
+				"phase",
+				WorldData.CITY_CITIZEN_TASK_PHASE_NONE
+			)
+		)
+
+		if (
+			task_phase
+			== WorldData.CITY_CITIZEN_TASK_PHASE_BLOCKED
+			and failure_text
+			== WorldData
+				.CITY_CITIZEN_MOVEMENT_FAILURE_NONE
+		):
+			failure_text = (
+				"task_blocked "
+				+ "(specific cause is not recorded yet)"
+			)
+
+		var schedule_start := (
+			format_debug_minute_of_day(
+				CitizenDecisionSystem
+				.WORK_SHIFT_START_MINUTE_OF_DAY
+			)
+		)
+		var schedule_end := (
+			format_debug_minute_of_day(
+				CitizenDecisionSystem
+				.WORK_SHIFT_END_MINUTE_OF_DAY
+			)
+		)
+
 		return (
 			"Selected citizen: "
-			+ str(
-				citizen.get(
-					"name",
-					"Unknown"
-				)
-			)
+			+ str(citizen.get("name", "Unknown"))
 			+ "\n"
 			+ "Selected id: "
 			+ str(selected_city_citizen_id)
+			+ "\n"
+			+ "Task: "
+			+ get_citizen_debug_task_text(
+				citizen
+			)
+			+ "\n"
+			+ "Task target: "
+			+ task_target_text
+			+ " | Destination: "
+			+ movement_destination_text
+			+ "\n"
+			+ "Workplace: "
+			+ get_citizen_debug_job_text(
+				citizen
+			)
+			+ "\n"
+			+ "Schedule: Work "
+			+ schedule_start
+			+ "-"
+			+ schedule_end
+			+ " | Active: "
+			+ DebugPanel.bool_to_yes_no(
+				CitizenDecisionSystem
+					.is_work_shift_active()
+			)
+			+ "\n"
+			+ "Failure: "
+			+ failure_text
 			+ "\n"
 		)
 
@@ -5809,4 +6247,27 @@ func get_city_debug_selection_text() -> String:
 		+ "Selected id: "
 		+ str(selected_city_object_id)
 		+ "\n"
+	)
+	
+func format_debug_minute_of_day(
+	minute_of_day: int
+) -> String:
+	var safe_minute := clampi(
+		minute_of_day,
+		0,
+		SimulationClock.MINUTES_PER_DAY - 1
+	)
+	var hour := int(
+		safe_minute
+		/ SimulationClock.MINUTES_PER_HOUR
+	)
+	var minute := (
+		safe_minute
+		% SimulationClock.MINUTES_PER_HOUR
+	)
+
+	return (
+		str(hour).pad_zeros(2)
+		+ ":"
+		+ str(minute).pad_zeros(2)
 	)
