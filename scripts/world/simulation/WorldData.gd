@@ -278,6 +278,13 @@ const WORKPLACE_PRODUCTION_STATUS_BLOCKED_MISSING_INPUT := "blocked_missing_inpu
 const WORKPLACE_PRODUCTION_STATUS_BLOCKED_NO_RESOURCE_SOURCE := (
 	"blocked_no_resource_source"
 )
+const CITY_WORKPLACE_PRODUCTION_STATE_KEYS := [
+	"object_id",
+	"progress_work_units",
+	"production_status",
+	"productive_worker_count",
+	"site_productivity_basis_points",
+]
 
 const CONTAINER_TYPE_NONE := "none"
 const CONTAINER_TYPE_PUBLIC_CITY_STORAGE := "public_city_storage"
@@ -719,12 +726,27 @@ static func is_valid_city_workplace_production_status(
 
 
 static func set_city_workplace_production_state(
-	object_id: int,
-	progress_work_units: int,
-	production_status: String,
-	productive_worker_count: int,
-	site_productivity_basis_points: int
+	values: Dictionary
 ) -> bool:
+	for raw_key in CITY_WORKPLACE_PRODUCTION_STATE_KEYS:
+		var key := str(raw_key)
+
+		if not values.has(key):
+			push_error(
+				"Workplace production state is missing key: "
+				+ key
+			)
+			return false
+
+	var object_id := int(values["object_id"])
+	var progress_work_units := int(values["progress_work_units"])
+	var production_status := str(values["production_status"])
+	var productive_worker_count := int(
+		values["productive_worker_count"]
+	)
+	var site_productivity_basis_points := int(
+		values["site_productivity_basis_points"]
+	)
 	var object_index := get_city_object_index_by_id(object_id)
 
 	if object_index < 0:
@@ -942,14 +964,49 @@ static func has_city_start_region() -> bool:
 
 	return true
 
-static func lock_world_save(
-	source_world: WorldData,
-	region_top_left: Vector2i,
-	region_center: Vector2i,
-	region_size: int,
-	world_scene_path: String,
-	city_scene_path: String
-) -> void:
+static func lock_world_save(values: Dictionary) -> void:
+	var required_keys: Array[String] = [
+		"source_world",
+		"region_top_left",
+		"region_center",
+		"region_size",
+		"world_scene_path",
+		"city_scene_path",
+	]
+
+	for key in required_keys:
+		if not values.has(key):
+			push_error(
+				"WorldData.lock_world_save is missing required key: "
+				+ key
+			)
+			return
+
+	if not values["source_world"] is WorldData:
+		push_error(
+			"WorldData.lock_world_save source_world must be WorldData."
+		)
+		return
+
+	if not values["region_top_left"] is Vector2i:
+		push_error(
+			"WorldData.lock_world_save region_top_left must be Vector2i."
+		)
+		return
+
+	if not values["region_center"] is Vector2i:
+		push_error(
+			"WorldData.lock_world_save region_center must be Vector2i."
+		)
+		return
+
+	var source_world: WorldData = values["source_world"]
+	var region_top_left: Vector2i = values["region_top_left"]
+	var region_center: Vector2i = values["region_center"]
+	var region_size := int(values["region_size"])
+	var world_scene_path := str(values["world_scene_path"])
+	var city_scene_path := str(values["city_scene_path"])
+
 	save_locked = true
 
 	official_world = source_world
@@ -982,15 +1039,56 @@ static func store_city_world_save(city_world: WorldData, city_seed: int) -> void
 	official_city_seed = city_seed
 	clear_city_map_texture_cache()
 	
-static func found_player_city(
-	city_name: String,
-	city_world_seed: int,
-	city_map_size: Vector2i,
-	foundation_top_left: Vector2i = Vector2i(-1, -1),
-	foundation_size: Vector2i = Vector2i.ZERO
-) -> void:
+static func found_player_city(values: Dictionary) -> void:
 	if player_city_founded:
 		return
+
+	var required_keys: Array[String] = [
+		"city_name",
+		"city_world_seed",
+		"city_map_size",
+	]
+
+	for key in required_keys:
+		if not values.has(key):
+			push_error(
+				"WorldData.found_player_city is missing required key: "
+				+ key
+			)
+			return
+
+	if not values["city_map_size"] is Vector2i:
+		push_error(
+			"WorldData.found_player_city city_map_size must be Vector2i."
+		)
+		return
+
+	var foundation_top_left_value = values.get(
+		"foundation_top_left",
+		Vector2i(-1, -1)
+	)
+	var foundation_size_value = values.get(
+		"foundation_size",
+		Vector2i.ZERO
+	)
+
+	if not foundation_top_left_value is Vector2i:
+		push_error(
+			"WorldData.found_player_city foundation_top_left must be Vector2i."
+		)
+		return
+
+	if not foundation_size_value is Vector2i:
+		push_error(
+			"WorldData.found_player_city foundation_size must be Vector2i."
+		)
+		return
+
+	var city_name := str(values["city_name"])
+	var city_world_seed := int(values["city_world_seed"])
+	var city_map_size: Vector2i = values["city_map_size"]
+	var foundation_top_left: Vector2i = foundation_top_left_value
+	var foundation_size: Vector2i = foundation_size_value
 
 	player_city_founded = true
 	player_city_foundation_top_left = foundation_top_left
@@ -2292,14 +2390,44 @@ static func set_city_citizen_task_phase(
 	return true
 
 static func set_city_citizen_task_activity_state(
-	citizen_id: int,
-	target_tile: Vector2i,
-	previous_target_tile: Vector2i = INVALID_CITY_TILE_POSITION,
-	next_action_world_minute: int = (
-		INVALID_CITY_CITIZEN_TASK_ACTION_WORLD_MINUTE
-	),
-	relocation_count: int = -1
+	values: Dictionary
 ) -> bool:
+	if not values.has("citizen_id") or not values.has("target_tile"):
+		push_error(
+			"Citizen task activity state requires citizen_id and target_tile."
+		)
+		return false
+
+	var raw_target_tile = values["target_tile"]
+	var raw_previous_target_tile = values.get(
+		"previous_target_tile",
+		INVALID_CITY_TILE_POSITION
+	)
+
+	if not raw_target_tile is Vector2i:
+		push_error(
+			"Citizen task activity target_tile must be Vector2i."
+		)
+		return false
+
+	if not raw_previous_target_tile is Vector2i:
+		push_error(
+			"Citizen task activity previous_target_tile must be Vector2i."
+		)
+		return false
+
+	var citizen_id := int(values["citizen_id"])
+	var target_tile: Vector2i = raw_target_tile
+	var previous_target_tile: Vector2i = raw_previous_target_tile
+	var next_action_world_minute := int(
+		values.get(
+			"next_action_world_minute",
+			INVALID_CITY_CITIZEN_TASK_ACTION_WORLD_MINUTE
+		)
+	)
+	var relocation_count := int(
+		values.get("relocation_count", -1)
+	)
 	var citizen_index := get_city_citizen_index_by_id(
 		citizen_id
 	)

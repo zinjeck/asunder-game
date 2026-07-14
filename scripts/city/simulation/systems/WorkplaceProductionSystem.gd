@@ -568,50 +568,60 @@ static func _run_workplace_tick(
 			outputs
 		)
 	):
-		_write_workplace_state(
-			object_id,
-			0,
-			WorldData.WORKPLACE_PRODUCTION_STATUS_INACTIVE,
-			productive_worker_count,
-			site_productivity
-		)
+		_write_workplace_state({
+			"object_id": object_id,
+			"progress_work_units": 0,
+			"production_status": (
+				WorldData.WORKPLACE_PRODUCTION_STATUS_INACTIVE
+			),
+			"productive_worker_count": productive_worker_count,
+			"site_productivity_basis_points": site_productivity,
+		})
 		return
 
 	var work_units_per_batch: int = raw_work_units_per_batch
 	var inputs: Dictionary = raw_inputs
 
 	if productive_worker_count <= 0:
-		_write_workplace_state(
-			object_id,
-			current_progress,
-			WorldData.WORKPLACE_PRODUCTION_STATUS_IDLE_NO_WORKERS,
-			0,
-			site_productivity
-		)
+		_write_workplace_state({
+			"object_id": object_id,
+			"progress_work_units": current_progress,
+			"production_status": (
+				WorldData.WORKPLACE_PRODUCTION_STATUS_IDLE_NO_WORKERS
+			),
+			"productive_worker_count": 0,
+			"site_productivity_basis_points": site_productivity,
+		})
 		return
 		
 	if (
 		uses_environmental_resource_source
 		and site_productivity <= 0
 	):
-		_write_workplace_state(
-			object_id,
-			current_progress,
-			WorldData.WORKPLACE_PRODUCTION_STATUS_BLOCKED_NO_RESOURCE_SOURCE,
-			productive_worker_count,
-			0
-		)
+		_write_workplace_state({
+			"object_id": object_id,
+			"progress_work_units": current_progress,
+			"production_status": (
+				WorldData
+				.WORKPLACE_PRODUCTION_STATUS_BLOCKED_NO_RESOURCE_SOURCE
+			),
+			"productive_worker_count": productive_worker_count,
+			"site_productivity_basis_points": 0,
+		})
 		return
 	# Input-consuming recipes fail closed until stored-input processing
 	# is implemented. This prevents future recipes from creating free goods.
 	if not inputs.is_empty():
-		_write_workplace_state(
-			object_id,
-			current_progress,
-			WorldData.WORKPLACE_PRODUCTION_STATUS_BLOCKED_MISSING_INPUT,
-			productive_worker_count,
-			site_productivity
-		)
+		_write_workplace_state({
+			"object_id": object_id,
+			"progress_work_units": current_progress,
+			"production_status": (
+				WorldData
+				.WORKPLACE_PRODUCTION_STATUS_BLOCKED_MISSING_INPUT
+			),
+			"productive_worker_count": productive_worker_count,
+			"site_productivity_basis_points": site_productivity,
+		})
 		return
 
 	var output_capacity_in_batches := (
@@ -622,13 +632,15 @@ static func _run_workplace_tick(
 	)
 
 	if output_capacity_in_batches <= 0:
-		_write_workplace_state(
-			object_id,
-			current_progress,
-			WorldData.WORKPLACE_PRODUCTION_STATUS_BLOCKED_OUTPUT_FULL,
-			productive_worker_count,
-			site_productivity
-		)
+		_write_workplace_state({
+			"object_id": object_id,
+			"progress_work_units": current_progress,
+			"production_status": (
+				WorldData.WORKPLACE_PRODUCTION_STATUS_BLOCKED_OUTPUT_FULL
+			),
+			"productive_worker_count": productive_worker_count,
+			"site_productivity_basis_points": site_productivity,
+		})
 		return
 
 	var work_units_added := _calculate_work_units(
@@ -638,13 +650,15 @@ static func _run_workplace_tick(
 	)
 
 	if work_units_added <= 0:
-		_write_workplace_state(
-			object_id,
-			current_progress,
-			WorldData.WORKPLACE_PRODUCTION_STATUS_WORKING,
-			productive_worker_count,
-			site_productivity
-		)
+		_write_workplace_state({
+			"object_id": object_id,
+			"progress_work_units": current_progress,
+			"production_status": (
+				WorldData.WORKPLACE_PRODUCTION_STATUS_WORKING
+			),
+			"productive_worker_count": productive_worker_count,
+			"site_productivity_basis_points": site_productivity,
+		})
 		return
 
 	var total_progress := current_progress + work_units_added
@@ -653,13 +667,15 @@ static func _run_workplace_tick(
 	)
 
 	if potential_completed_batches <= 0:
-		_write_workplace_state(
-			object_id,
-			total_progress,
-			WorldData.WORKPLACE_PRODUCTION_STATUS_WORKING,
-			productive_worker_count,
-			site_productivity
-		)
+		_write_workplace_state({
+			"object_id": object_id,
+			"progress_work_units": total_progress,
+			"production_status": (
+				WorldData.WORKPLACE_PRODUCTION_STATUS_WORKING
+			),
+			"productive_worker_count": productive_worker_count,
+			"site_productivity_basis_points": site_productivity,
+		})
 		return
 
 	var batches_to_produce := mini(
@@ -678,13 +694,15 @@ static func _run_workplace_tick(
 			+ " could not store its prevalidated production output."
 		)
 
-		_write_workplace_state(
-			object_id,
-			current_progress,
-			WorldData.WORKPLACE_PRODUCTION_STATUS_BLOCKED_OUTPUT_FULL,
-			productive_worker_count,
-			site_productivity
-		)
+		_write_workplace_state({
+			"object_id": object_id,
+			"progress_work_units": current_progress,
+			"production_status": (
+				WorldData.WORKPLACE_PRODUCTION_STATUS_BLOCKED_OUTPUT_FULL
+			),
+			"productive_worker_count": productive_worker_count,
+			"site_productivity_basis_points": site_productivity,
+		})
 		return
 
 	var new_progress := (
@@ -717,13 +735,13 @@ static func _run_workplace_tick(
 			WorldData.WORKPLACE_PRODUCTION_STATUS_BLOCKED_OUTPUT_FULL
 		)
 
-	_write_workplace_state(
-		object_id,
-		new_progress,
-		new_status,
-		productive_worker_count,
-		site_productivity
-	)
+	_write_workplace_state({
+		"object_id": object_id,
+		"progress_work_units": new_progress,
+		"production_status": new_status,
+		"productive_worker_count": productive_worker_count,
+		"site_productivity_basis_points": site_productivity,
+	})
 
 static func _get_productive_worker_count(
 	city_object: Dictionary
@@ -886,16 +904,8 @@ static func _store_recipe_outputs(
 
 
 static func _write_workplace_state(
-	object_id: int,
-	progress_work_units: int,
-	production_status: String,
-	productive_worker_count: int,
-	site_productivity_basis_points: int
+	values: Dictionary
 ) -> void:
 	WorldData.set_city_workplace_production_state(
-		object_id,
-		progress_work_units,
-		production_status,
-		productive_worker_count,
-		site_productivity_basis_points
+		values
 	)

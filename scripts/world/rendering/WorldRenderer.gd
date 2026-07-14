@@ -126,17 +126,35 @@ func on_simulation_time_changed(
 	update_debug_panel_text()
 
 func setup_world_texture_cache() -> void:
-	world_texture_cache.setup(
-		self,
-		"World",
-		24,
-		Callable(self, "get_tile_color_for_mode"),
-		Callable(self, "get_all_world_view_modes"),
-		Callable(self, "get_world_view_mode_name_for_mode"),
-		Callable(self, "has_valid_saved_world_map_texture_cache"),
-		Callable(self, "get_saved_world_map_texture_cache"),
-		Callable(self, "store_saved_world_map_texture_cache")
-	)
+	world_texture_cache.setup({
+		"owner": self,
+		"label": "World",
+		"rows_per_frame": 24,
+		"color_provider": Callable(
+			self,
+			"get_tile_color_for_mode"
+		),
+		"modes_provider": Callable(
+			self,
+			"get_all_world_view_modes"
+		),
+		"mode_name_provider": Callable(
+			self,
+			"get_world_view_mode_name_for_mode"
+		),
+		"has_valid_saved_cache_provider": Callable(
+			self,
+			"has_valid_saved_world_map_texture_cache"
+		),
+		"saved_cache_getter": Callable(
+			self,
+			"get_saved_world_map_texture_cache"
+		),
+		"saved_cache_storer": Callable(
+			self,
+			"store_saved_world_map_texture_cache"
+		),
+	})
 
 
 func has_valid_saved_world_map_texture_cache(source_world: WorldData) -> bool:
@@ -210,15 +228,18 @@ func create_region_selection_lines() -> void:
 
 func create_debug_panel() -> void:
 	debug_panel_ui = DebugPanel.new()
-	debug_panel_ui.setup(
-		self,
-		100,
-		debug_panel_position,
-		debug_panel_padding,
-		debug_panel_min_size,
-		"DEBUG MENU",
-		Callable(self, "get_hovered_tile_debug_text")
-	)
+	debug_panel_ui.setup({
+		"parent": self,
+		"canvas_layer_index": 100,
+		"panel_position": debug_panel_position,
+		"padding": debug_panel_padding,
+		"minimum_size": debug_panel_min_size,
+		"initial_text": "DEBUG MENU",
+		"text_provider": Callable(
+			self,
+			"get_hovered_tile_debug_text"
+		),
+	})
 
 func toggle_debug_mode() -> void:
 	if debug_panel_ui == null:
@@ -962,14 +983,14 @@ func on_play_button_pressed() -> void:
 	if get_tree().current_scene != null:
 		current_world_scene_path = get_tree().current_scene.scene_file_path
 
-	WorldData.lock_world_save(
-		world,
-		selected_region_top_left,
-		selected_region_center,
-		region_size_tiles,
-		current_world_scene_path,
-		city_scene_path
-	)
+	WorldData.lock_world_save({
+		"source_world": world,
+		"region_top_left": selected_region_top_left,
+		"region_center": selected_region_center,
+		"region_size": region_size_tiles,
+		"world_scene_path": current_world_scene_path,
+		"city_scene_path": city_scene_path,
+	})
 
 	set_world_locked_ui()
 

@@ -10,6 +10,9 @@ const CityNavigationSystemScript = preload(
 const CityCitizenMovementPresentationScript = preload(
 	"res://scripts/citizens/rendering/CityCitizenMovementPresentation.gd"
 )
+const CitizenDebugPanelScript = preload(
+	"res://scripts/ui/debug/CitizenDebugPanel.gd"
+)
 @export_file("*.tscn") var world_scene_path: String = ""
 @export var local_tiles_per_world_tile: int = 64
 @export var city_tile_size: int = 2
@@ -60,16 +63,7 @@ var debug_navigation_duration_usec: int = 0
 var debug_selected_city_tile: Vector2i = (
 	WorldData.INVALID_CITY_TILE_POSITION
 )
-var citizen_debug_button: Button
-var citizen_debug_panel: Panel
-var citizen_debug_title_label: Label
-var citizen_debug_body_label: Label
-var is_citizen_debug_panel_open: bool = false
-
-const CITIZEN_DEBUG_BUTTON_POSITION: Vector2 = Vector2(270.0, 28.0)
-const CITIZEN_DEBUG_BUTTON_SIZE: Vector2 = Vector2(145.0, 26.0)
-const CITIZEN_DEBUG_PANEL_MARGIN: float = 10.0
-const CITIZEN_DEBUG_PANEL_SIZE: Vector2 = Vector2(540.0, 300.0)
+var citizen_debug_ui = CitizenDebugPanelScript.new()
 const DEFAULT_CITY_OBJECT_FRAME_COLOR: Color = Color(0.32, 0.30, 0.24, 0.95)
 const DEFAULT_CITY_OBJECT_FILL_COLOR: Color = Color(0.86, 0.84, 0.76, 0.55)
 const DEFAULT_CITY_OBJECT_FRAME_THICKNESS: float = 0.35
@@ -197,6 +191,8 @@ const DEBUG_NAVIGATION_PATH_LINE_COLOR: Color = (
 const DEBUG_SELECTED_TILE_HIGHLIGHT_COLOR: Color = (
 	Color(0.0, 1.0, 1.0, 1.0)
 )
+
+#region Lifecycle and input
 
 func _ready() -> void:
 	texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
@@ -412,16 +408,6 @@ func _process(delta: float) -> void:
 			or city_citizen_movement_changed
 			or city_citizen_task_changed
 		)
-		and WorldData.debug_mode_enabled
-	):
-		update_citizen_debug_ui()
-
-	if (
-		(
-			city_citizen_spatial_changed
-			or city_citizen_movement_changed
-			or city_citizen_task_changed
-		)
 		and selected_city_entity_kind
 		== CITY_SELECTION_KIND_CITIZEN
 	):
@@ -551,6 +537,10 @@ func _unhandled_input(event: InputEvent) -> void:
 			get_viewport().set_input_as_handled()
 			return
 
+#endregion
+
+#region Simulation clock and debug input helpers
+
 func connect_simulation_clock_signals() -> void:
 	var time_changed_callable := Callable(
 		self,
@@ -631,6 +621,10 @@ func add_debug_resource_to_selected_stockpile(resource: String, amount_delta: in
 		" to public storage object #",
 		selected_city_object_id
 	)
+
+#endregion
+
+#region City generation
 
 func generate_city_world() -> void:
 	if WorldData.has_active_city_save():
@@ -965,6 +959,10 @@ func get_city_resource_from_profile(
 
 	return WorldData.RESOURCE_NONE
 
+#endregion
+
+#region Camera
+
 func create_city_camera() -> void:
 	if city_world == null:
 		return
@@ -996,6 +994,10 @@ func store_current_city_camera_state() -> void:
 	WorldData.city_camera_position = camera.position
 	WorldData.city_camera_zoom = camera.zoom
 	WorldData.has_city_camera_state = true
+
+#endregion
+
+#region General UI, resource bar, map modes, and object panels
 
 func create_city_ui() -> void:
 	ui_layer = CanvasLayer.new()
@@ -2516,6 +2518,10 @@ func get_biome_color(tile: Dictionary) -> Color:
 func get_resource_color(resource: String) -> Color:
 	return MapVisuals.get_resource_color(resource)
 
+#endregion
+
+#region Placement and selection input
+
 func create_build_option_button() -> void:
 	build_option_button = Button.new()
 	build_option_button.text = ""
@@ -2707,13 +2713,16 @@ func after_city_center_placed(city_object: Dictionary) -> void:
 	var top_left: Vector2i = city_object.get("top_left", Vector2i(-1, -1))
 	var size_tiles: Vector2i = city_object.get("size", Vector2i.ZERO)
 
-	WorldData.found_player_city(
-		"First City",
-		city_seed,
-		Vector2i(city_world.width, city_world.height),
-		top_left,
-		size_tiles
-	)
+	WorldData.found_player_city({
+		"city_name": "First City",
+		"city_world_seed": city_seed,
+		"city_map_size": Vector2i(
+			city_world.width,
+			city_world.height
+		),
+		"foundation_top_left": top_left,
+		"foundation_size": size_tiles,
+	})
 
 	update_city_object_button_states()
 	update_build_button_state()
@@ -3277,18 +3286,40 @@ func confirm_road_preview() -> void:
 
 	queue_redraw()
 
+#endregion
+
+#region Map texture cache
+
 func setup_city_texture_cache() -> void:
-	city_texture_cache.setup(
-		self,
-		"City",
-		16,
-		Callable(self, "get_city_tile_color_for_mode"),
-		Callable(self, "get_all_city_view_modes"),
-		Callable(self, "get_city_map_mode_name"),
-		Callable(self, "has_valid_saved_city_map_texture_cache"),
-		Callable(self, "get_saved_city_map_texture_cache"),
-		Callable(self, "store_saved_city_map_texture_cache")
-	)
+	city_texture_cache.setup({
+		"owner": self,
+		"label": "City",
+		"rows_per_frame": 16,
+		"color_provider": Callable(
+			self,
+			"get_city_tile_color_for_mode"
+		),
+		"modes_provider": Callable(
+			self,
+			"get_all_city_view_modes"
+		),
+		"mode_name_provider": Callable(
+			self,
+			"get_city_map_mode_name"
+		),
+		"has_valid_saved_cache_provider": Callable(
+			self,
+			"has_valid_saved_city_map_texture_cache"
+		),
+		"saved_cache_getter": Callable(
+			self,
+			"get_saved_city_map_texture_cache"
+		),
+		"saved_cache_storer": Callable(
+			self,
+			"store_saved_city_map_texture_cache"
+		),
+	})
 
 
 func has_valid_saved_city_map_texture_cache(source_world: WorldData) -> bool:
@@ -3342,6 +3373,10 @@ func start_city_texture_warmup() -> void:
 		setup_city_texture_cache()
 
 	city_texture_cache.start_warmup(city_world)
+
+#endregion
+
+#region Rendering and tile drawing
 
 func draw_selected_workplace_zone_background() -> void:
 	if selected_city_object_id == null:
@@ -3841,6 +3876,8 @@ func clear_city_object_placement() -> void:
 func has_active_city_object_placement() -> bool:
 	return not active_city_object_placement.is_empty()
 
+
+#region Workplace zone painting and cache
 
 func get_city_object_top_left_tile_from_mouse(size_tiles: Vector2i) -> Vector2i:
 	if city_world == null:
@@ -4518,6 +4555,8 @@ func draw_selected_workplace_resource_zone(
 
 	return true
 
+#endregion
+
 func draw_city_object_placement_outline(
 	preview_object: Dictionary,
 	can_place: bool
@@ -5028,6 +5067,10 @@ func draw_inner_box_border(rect: Rect2, border_color: Color, border_width: float
 	)
 
 
+#endregion
+
+#region City foundation and hover coordinates
+
 func ensure_city_foundation_object_exists() -> void:
 	if not WorldData.has_player_city_foundation():
 		return
@@ -5144,218 +5187,39 @@ func update_city_hover_visual() -> void:
 	hover_tile_outline.size = rect.size
 	hover_tile_outline.move_to_front()
 
+#endregion
+
+#region Debug panel, navigation, and diagnostics
+
 func update_debug_panel_text() -> void:
 	if debug_panel_ui == null:
 		return
 
 	debug_panel_ui.refresh()
-	update_citizen_debug_ui()
+	citizen_debug_ui.refresh()
 
 func create_debug_panel() -> void:
 	debug_panel_ui = DebugPanel.new()
-	debug_panel_ui.setup(
-		self,
-		120,
-		debug_panel_position,
-		debug_panel_padding,
-		debug_panel_min_size,
-		"DEBUG INFO",
-		Callable(self, "get_city_debug_panel_text")
-	)
+	debug_panel_ui.setup({
+		"parent": self,
+		"canvas_layer_index": 120,
+		"panel_position": debug_panel_position,
+		"padding": debug_panel_padding,
+		"minimum_size": debug_panel_min_size,
+		"initial_text": "DEBUG INFO",
+		"text_provider": Callable(
+			self,
+			"get_city_debug_panel_text"
+		),
+	})
 
-	var panel_moved_callable := Callable(
-		self,
-		"on_debug_panel_moved"
-	)
-
-	if not debug_panel_ui.panel_moved.is_connected(
-		panel_moved_callable
-	):
-		debug_panel_ui.panel_moved.connect(
-			panel_moved_callable
-		)
-	var minimized_changed_callable := Callable(
-		self,
-		"on_debug_panel_minimized_changed"
-	)
-
-	if not debug_panel_ui.minimized_changed.is_connected(
-		minimized_changed_callable
-	):
-		debug_panel_ui.minimized_changed.connect(
-			minimized_changed_callable
-		)
-	create_citizen_debug_button()
-	create_citizen_debug_list_panel()
-	update_citizen_debug_ui()
-
-func on_debug_panel_moved(
-	_new_position: Vector2
-) -> void:
-	layout_citizen_debug_list_panel()
-
-func on_debug_panel_minimized_changed(
-	_is_minimized: bool
-) -> void:
-	update_citizen_debug_ui()
-	layout_citizen_debug_list_panel()
-
-func create_citizen_debug_button() -> void:
-	if debug_panel_ui == null:
-		return
-
-	if debug_panel_ui.panel == null:
-		return
-
-	debug_panel_ui.panel.mouse_filter = Control.MOUSE_FILTER_PASS
-
-	citizen_debug_button = Button.new()
-	citizen_debug_button.text = "Citizens"
-	citizen_debug_button.position = CITIZEN_DEBUG_BUTTON_POSITION
-	citizen_debug_button.size = CITIZEN_DEBUG_BUTTON_SIZE
-	citizen_debug_button.focus_mode = Control.FOCUS_NONE
-	citizen_debug_button.mouse_filter = Control.MOUSE_FILTER_STOP
-	citizen_debug_button.visible = WorldData.debug_mode_enabled
-	citizen_debug_button.pressed.connect(Callable(self, "toggle_citizen_debug_list_panel"))
-
-	debug_panel_ui.panel.add_child(citizen_debug_button)
-
-
-func create_citizen_debug_list_panel() -> void:
-	if debug_panel_ui == null:
-		return
-
-	if debug_panel_ui.canvas_layer == null:
-		return
-
-	citizen_debug_panel = Panel.new()
-	citizen_debug_panel.visible = false
-	citizen_debug_panel.mouse_filter = Control.MOUSE_FILTER_STOP
-
-	var panel_style := StyleBoxFlat.new()
-	panel_style.bg_color = Color(0.0, 0.0, 0.0, 0.76)
-	panel_style.border_color = Color(0.0, 0.55, 1.0, 0.60)
-	panel_style.set_border_width_all(1)
-	panel_style.set_corner_radius_all(6)
-	citizen_debug_panel.add_theme_stylebox_override("panel", panel_style)
-
-	debug_panel_ui.canvas_layer.add_child(citizen_debug_panel)
-
-	citizen_debug_title_label = Label.new()
-	citizen_debug_title_label.text = "CITIZENS"
-	citizen_debug_title_label.position = Vector2(12.0, 10.0)
-	citizen_debug_title_label.size = Vector2(CITIZEN_DEBUG_PANEL_SIZE.x - 24.0, 24.0)
-	citizen_debug_title_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	citizen_debug_title_label.add_theme_color_override("font_color", Color(0.88, 0.96, 1.0, 1.0))
-	citizen_debug_title_label.add_theme_font_size_override("font_size", 15)
-	citizen_debug_panel.add_child(citizen_debug_title_label)
-
-	citizen_debug_body_label = Label.new()
-	citizen_debug_body_label.text = ""
-	citizen_debug_body_label.position = Vector2(12.0, 42.0)
-	citizen_debug_body_label.size = Vector2(CITIZEN_DEBUG_PANEL_SIZE.x - 24.0, CITIZEN_DEBUG_PANEL_SIZE.y - 54.0)
-	citizen_debug_body_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	citizen_debug_body_label.autowrap_mode = TextServer.AUTOWRAP_OFF
-	citizen_debug_body_label.clip_text = false
-	citizen_debug_body_label.add_theme_color_override("font_color", Color(0.82, 0.94, 1.0, 1.0))
-	citizen_debug_body_label.add_theme_font_size_override("font_size", 12)
-	citizen_debug_panel.add_child(citizen_debug_body_label)
-
-	layout_citizen_debug_list_panel()
-	update_citizen_debug_list_text()
-
-
-func toggle_citizen_debug_list_panel() -> void:
-	is_citizen_debug_panel_open = not is_citizen_debug_panel_open
-	update_citizen_debug_ui()
-
-
-func update_citizen_debug_ui() -> void:
-	var is_debug_panel_expanded := (
-		WorldData.debug_mode_enabled
-		and debug_panel_ui != null
-		and not debug_panel_ui.is_minimized
-	)
-
-	if citizen_debug_button != null:
-		citizen_debug_button.visible = (
-			is_debug_panel_expanded
-		)
-
-		if is_citizen_debug_panel_open:
-			citizen_debug_button.text = (
-				"Hide Citizens"
-			)
-		else:
-			citizen_debug_button.text = "Citizens"
-
-	if citizen_debug_panel != null:
-		citizen_debug_panel.visible = (
-			is_debug_panel_expanded
-			and is_citizen_debug_panel_open
-		)
-
-		if citizen_debug_panel.visible:
-			layout_citizen_debug_list_panel()
-			update_citizen_debug_list_text()
-
-func layout_citizen_debug_list_panel() -> void:
-	if citizen_debug_panel == null:
-		return
-
-	var panel_position := Vector2(
-		debug_panel_position.x
-		+ debug_panel_min_size.x
-		+ CITIZEN_DEBUG_PANEL_MARGIN,
-		debug_panel_position.y
-	)
-
-	if debug_panel_ui != null and debug_panel_ui.panel != null:
-		panel_position = (
-			debug_panel_ui.panel.position
-			+ Vector2(
-				debug_panel_ui.panel.size.x
-				+ CITIZEN_DEBUG_PANEL_MARGIN,
-				0.0
-			)
-		)
-
-	citizen_debug_panel.position = panel_position
-	citizen_debug_panel.size = CITIZEN_DEBUG_PANEL_SIZE
-
-	if citizen_debug_title_label != null:
-		citizen_debug_title_label.position = Vector2(
-			12.0,
-			10.0
-		)
-
-		citizen_debug_title_label.size = Vector2(
-			CITIZEN_DEBUG_PANEL_SIZE.x - 24.0,
-			24.0
-		)
-
-	if citizen_debug_body_label != null:
-		citizen_debug_body_label.position = Vector2(
-			12.0,
-			42.0
-		)
-
-		citizen_debug_body_label.size = Vector2(
-			CITIZEN_DEBUG_PANEL_SIZE.x - 24.0,
-			CITIZEN_DEBUG_PANEL_SIZE.y - 54.0
-		)
-
-func update_citizen_debug_list_text() -> void:
-	if citizen_debug_body_label == null:
-		return
-
-	if not WorldData.debug_mode_enabled:
-		return
-
-	if not is_citizen_debug_panel_open:
-		return
-
-	citizen_debug_body_label.text = get_citizen_debug_list_text()
+	citizen_debug_ui.setup({
+		"debug_panel": debug_panel_ui,
+		"text_provider": Callable(
+			self,
+			"get_citizen_debug_list_text"
+		),
+	})
 
 func get_first_living_debug_citizen() -> Dictionary:
 	for raw_citizen in WorldData.city_citizens:
@@ -5614,7 +5478,6 @@ func assign_debug_navigation_path_to_selected_citizen() -> void:
 	)
 
 	update_selected_entity_panel()
-	update_citizen_debug_ui()
 	update_debug_panel_text()
 
 	CityStateValidator.validate(true, true)
@@ -5821,7 +5684,7 @@ func toggle_debug_mode() -> void:
 		return
 
 	var is_enabled := debug_panel_ui.toggle_enabled()
-	update_citizen_debug_ui()
+	citizen_debug_ui.refresh()
 	queue_redraw()
 
 	if is_enabled:
@@ -6271,3 +6134,5 @@ func format_debug_minute_of_day(
 		+ ":"
 		+ str(minute).pad_zeros(2)
 	)
+
+#endregion

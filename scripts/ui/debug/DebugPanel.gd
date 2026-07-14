@@ -15,24 +15,24 @@ var text_provider: Callable
 const MINIMUM_GRABBABLE_WIDTH: float = 72.0
 const MINIMUM_GRABBABLE_HEIGHT: float = 24.0
 const MINIMIZE_BUTTON_SIZE: Vector2 = Vector2(26.0, 24.0)
+const HEADER_ACCESSORY_GAP: float = 6.0
 var is_minimized: bool = false
 var _is_dragging: bool = false
 var _drag_offset: Vector2 = Vector2.ZERO
 var _base_position: Vector2 = Vector2.ZERO
 var _expanded_size: Vector2 = Vector2.ZERO
 
-func setup(
-	parent: Node,
-	canvas_layer_index: int,
-	panel_position: Vector2,
-	padding: Vector2,
-	minimum_size: Vector2,
-	initial_text: String,
-	provider: Callable
-) -> void:
-	panel_padding = padding
-	panel_min_size = minimum_size
-	text_provider = provider
+func setup(values: Dictionary) -> void:
+	if not _has_valid_setup_values(values):
+		return
+
+	var parent: Node = values["parent"]
+	var canvas_layer_index := int(values["canvas_layer_index"])
+	var panel_position: Vector2 = values["panel_position"]
+
+	panel_padding = values["padding"]
+	panel_min_size = values["minimum_size"]
+	text_provider = values["text_provider"]
 
 	canvas_layer = CanvasLayer.new()
 	canvas_layer.layer = canvas_layer_index
@@ -64,12 +64,54 @@ func setup(
 	label.clip_text = false
 	label.add_theme_color_override("font_color", Color(0.82, 0.94, 1.0, 1.0))
 	label.add_theme_font_size_override("font_size", 13)
-	label.text = initial_text
+	label.text = str(values["initial_text"])
 
 	panel.add_child(label)
 	_create_minimize_button()
 	fit_to_text()
 	refresh()
+
+
+func _has_valid_setup_values(values: Dictionary) -> bool:
+	var required_keys: Array[String] = [
+		"parent",
+		"canvas_layer_index",
+		"panel_position",
+		"padding",
+		"minimum_size",
+		"initial_text",
+		"text_provider",
+	]
+
+	for key in required_keys:
+		if not values.has(key):
+			push_error(
+				"DebugPanel.setup is missing required key: "
+				+ key
+			)
+			return false
+
+	if not values["parent"] is Node:
+		push_error("DebugPanel.setup parent must be a Node.")
+		return false
+
+	if not values["panel_position"] is Vector2:
+		push_error("DebugPanel.setup panel_position must be Vector2.")
+		return false
+
+	if not values["padding"] is Vector2:
+		push_error("DebugPanel.setup padding must be Vector2.")
+		return false
+
+	if not values["minimum_size"] is Vector2:
+		push_error("DebugPanel.setup minimum_size must be Vector2.")
+		return false
+
+	if typeof(values["text_provider"]) != TYPE_CALLABLE:
+		push_error("DebugPanel.setup text_provider must be Callable.")
+		return false
+
+	return true
 
 
 func set_enabled(is_enabled: bool) -> void:
@@ -283,6 +325,54 @@ func _layout_minimize_button() -> void:
 	minimize_button.move_to_front()
 
 
+func get_header_accessory_rect() -> Rect2:
+	if panel == null:
+		return Rect2()
+
+	var right_edge := (
+		panel.size.x
+		- MINIMIZE_BUTTON_SIZE.x
+		- HEADER_ACCESSORY_GAP
+	)
+	var left_edge := panel_padding.x
+
+	return Rect2(
+		Vector2(left_edge, 0.0),
+		Vector2(
+			maxf(right_edge - left_edge, 0.0),
+			MINIMIZE_BUTTON_SIZE.y
+		)
+	)
+
+
+func get_content_rect() -> Rect2:
+	if panel == null:
+		return Rect2()
+
+	var content_position := Vector2(
+		panel_padding.x,
+		MINIMIZE_BUTTON_SIZE.y
+		+ panel_padding.y
+	)
+
+	return Rect2(
+		content_position,
+		Vector2(
+			maxf(
+				panel.size.x
+				- panel_padding.x * 2.0,
+				0.0
+			),
+			maxf(
+				panel.size.y
+				- content_position.y
+				- panel_padding.y,
+				0.0
+			)
+		)
+	)
+
+
 func _on_minimize_button_pressed() -> void:
 	set_minimized(not is_minimized)
 
@@ -294,16 +384,6 @@ func _on_panel_gui_input(event: InputEvent) -> void:
 		var mouse_button_event: InputEventMouseButton = event
 
 		if mouse_button_event.button_index != MOUSE_BUTTON_LEFT:
-			return
-		if (
-			minimize_button != null
-			and Rect2(
-				minimize_button.position,
-				minimize_button.size
-			).has_point(
-				mouse_button_event.position
-			)
-		):
 			return
 		if mouse_button_event.pressed:
 			_is_dragging = true

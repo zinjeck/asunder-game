@@ -16,26 +16,67 @@ var saved_cache_getter: Callable
 var saved_cache_storer: Callable
 
 
-func setup(
-	owner_node: Node,
-	cache_label: String,
-	warmup_rows_per_frame: int,
-	get_color_for_mode: Callable,
-	get_all_modes_callable: Callable,
-	get_mode_name_callable: Callable,
-	has_valid_saved_cache: Callable,
-	get_saved_cache: Callable,
-	store_saved_cache: Callable
-) -> void:
-	owner = owner_node
-	label = cache_label
-	rows_per_frame = max(1, warmup_rows_per_frame)
-	color_provider = get_color_for_mode
-	modes_provider = get_all_modes_callable
-	mode_name_provider = get_mode_name_callable
-	has_valid_saved_cache_provider = has_valid_saved_cache
-	saved_cache_getter = get_saved_cache
-	saved_cache_storer = store_saved_cache
+func setup(values: Dictionary) -> void:
+	if not _has_valid_setup_values(values):
+		return
+
+	owner = values["owner"]
+	label = str(values["label"])
+	rows_per_frame = maxi(1, int(values["rows_per_frame"]))
+	color_provider = values["color_provider"]
+	modes_provider = values["modes_provider"]
+	mode_name_provider = values["mode_name_provider"]
+	has_valid_saved_cache_provider = (
+		values["has_valid_saved_cache_provider"]
+	)
+	saved_cache_getter = values["saved_cache_getter"]
+	saved_cache_storer = values["saved_cache_storer"]
+
+
+func _has_valid_setup_values(values: Dictionary) -> bool:
+	var required_keys: Array[String] = [
+		"owner",
+		"label",
+		"rows_per_frame",
+		"color_provider",
+		"modes_provider",
+		"mode_name_provider",
+		"has_valid_saved_cache_provider",
+		"saved_cache_getter",
+		"saved_cache_storer",
+	]
+
+	for key in required_keys:
+		if not values.has(key):
+			push_error(
+				"MapTextureCache.setup is missing required key: "
+				+ key
+			)
+			return false
+
+	if not values["owner"] is Node:
+		push_error("MapTextureCache.setup owner must be a Node.")
+		return false
+
+	var callable_keys: Array[String] = [
+		"color_provider",
+		"modes_provider",
+		"mode_name_provider",
+		"has_valid_saved_cache_provider",
+		"saved_cache_getter",
+		"saved_cache_storer",
+	]
+
+	for key in callable_keys:
+		if typeof(values[key]) != TYPE_CALLABLE:
+			push_error(
+				"MapTextureCache.setup "
+				+ key
+				+ " must be Callable."
+			)
+			return false
+
+	return true
 
 
 func clear() -> void:
@@ -58,7 +99,11 @@ func rebuild(source_world: WorldData, active_mode: int) -> ImageTexture:
 	store_cache(source_world)
 	start_warmup(source_world)
 
-	print(label + " map texture ready: ", get_mode_name(active_mode))
+	if WorldData.debug_mode_enabled:
+		print(
+			label + " map texture ready: ",
+			get_mode_name(active_mode)
+		)
 
 	return get_texture_for_mode(source_world, active_mode)
 
@@ -187,10 +232,16 @@ func warm_texture_cache_async(source_world: WorldData, token: int) -> void:
 		mode_textures[mode_int] = ImageTexture.create_from_image(image)
 		store_cache(source_world)
 
-		print("Warmed " + label.to_lower() + " map texture: ", get_mode_name(mode_int))
+		if WorldData.debug_mode_enabled:
+			print(
+				"Warmed " + label.to_lower() + " map texture: ",
+				get_mode_name(mode_int)
+			)
 
 	warmup_running = false
-	print(label + " map texture warmup complete.")
+
+	if WorldData.debug_mode_enabled:
+		print(label + " map texture warmup complete.")
 
 
 func is_warmup_still_valid(source_world: WorldData, token: int) -> bool:

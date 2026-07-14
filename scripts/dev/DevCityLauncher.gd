@@ -38,14 +38,14 @@ static func launch_dev_city(
 		int(DEV_REGION_SIZE / 2)
 	)
 
-	WorldData.lock_world_save(
-		dev_world,
-		region_top_left,
-		region_center,
-		DEV_REGION_SIZE,
-		main_menu_scene_path,
-		city_scene_path
-	)
+	WorldData.lock_world_save({
+		"source_world": dev_world,
+		"region_top_left": region_top_left,
+		"region_center": region_center,
+		"region_size": DEV_REGION_SIZE,
+		"world_scene_path": main_menu_scene_path,
+		"city_scene_path": city_scene_path,
+	})
 
 	print("Launching dev city.")
 	print("Dev world seed: ", dev_world.seed)
@@ -141,37 +141,6 @@ static func is_dev_region_valid_with_prefix(
 	)
 
 	var total_tiles := region_size * region_size
-	var ocean_ratio := float(ocean_tiles) / float(total_tiles)
-
-	return ocean_ratio <= DEV_REGION_OCEAN_RATIO_LIMIT
-
-
-static func is_dev_region_valid(
-	world: WorldData,
-	region_top_left: Vector2i,
-	region_size: int
-) -> bool:
-	if region_top_left.x < 0 or region_top_left.y < 0:
-		return false
-
-	if region_top_left.x + region_size > world.width:
-		return false
-
-	if region_top_left.y + region_size > world.height:
-		return false
-
-	var ocean_tiles := 0
-	var total_tiles := region_size * region_size
-
-	for y_offset in range(region_size):
-		for x_offset in range(region_size):
-			var tile_x := region_top_left.x + x_offset
-			var tile_y := region_top_left.y + y_offset
-			var tile: Dictionary = world.tiles[tile_y][tile_x]
-
-			if str(tile.get("biome", "")) == WorldData.BIOME_OCEAN:
-				ocean_tiles += 1
-
 	var ocean_ratio := float(ocean_tiles) / float(total_tiles)
 
 	return ocean_ratio <= DEV_REGION_OCEAN_RATIO_LIMIT

@@ -11,6 +11,16 @@ const CARDINAL_NEIGHBOR_OFFSETS: Array[Vector2i] = [
 	Vector2i(0, 1),
 	Vector2i(-1, 0)
 ]
+const ACTIVITY_CHOICE_REQUIRED_KEYS := [
+	"activity_tiles",
+	"current_tile",
+	"previous_target_tile",
+	"citizen_id",
+	"workplace_id",
+	"choice_sequence",
+	"minimum_relocation_distance",
+	"avoid_previous_target",
+]
 # This resolver answers only:
 # "Which tiles are legal candidate locations for this activity?"
 #
@@ -196,15 +206,28 @@ static func _tile_cardinally_borders_terrain(
 	return false
 
 static func choose_work_activity_tile(
-	activity_tiles: Array[Vector2i],
-	current_tile: Vector2i,
-	previous_target_tile: Vector2i,
-	citizen_id: int,
-	workplace_id: int,
-	choice_sequence: int,
-	minimum_relocation_distance: int,
-	avoid_previous_target: bool
+	values: Dictionary
 ) -> Vector2i:
+	if not _has_valid_activity_choice_values(values):
+		return WorldData.INVALID_CITY_TILE_POSITION
+
+	var activity_tiles: Array[Vector2i] = (
+		values["activity_tiles"]
+	)
+	var current_tile: Vector2i = values["current_tile"]
+	var previous_target_tile: Vector2i = (
+		values["previous_target_tile"]
+	)
+	var citizen_id := int(values["citizen_id"])
+	var workplace_id := int(values["workplace_id"])
+	var choice_sequence := int(values["choice_sequence"])
+	var minimum_relocation_distance := int(
+		values["minimum_relocation_distance"]
+	)
+	var avoid_previous_target := bool(
+		values["avoid_previous_target"]
+	)
+
 	if activity_tiles.is_empty():
 		return WorldData.INVALID_CITY_TILE_POSITION
 
@@ -255,6 +278,40 @@ static func choose_work_activity_tile(
 	)
 
 	return selection_pool[selected_index]
+
+
+static func _has_valid_activity_choice_values(
+	values: Dictionary
+) -> bool:
+	for raw_key in ACTIVITY_CHOICE_REQUIRED_KEYS:
+		var key := str(raw_key)
+
+		if not values.has(key):
+			push_error(
+				"Work activity tile request is missing key: "
+				+ key
+			)
+			return false
+
+	if not values["activity_tiles"] is Array:
+		push_error(
+			"Work activity tile request activity_tiles must be Array."
+		)
+		return false
+
+	if not values["current_tile"] is Vector2i:
+		push_error(
+			"Work activity tile request current_tile must be Vector2i."
+		)
+		return false
+
+	if not values["previous_target_tile"] is Vector2i:
+		push_error(
+			"Work activity tile request previous_target_tile must be Vector2i."
+		)
+		return false
+
+	return true
 
 
 static func _make_deterministic_choice_value(
