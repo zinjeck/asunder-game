@@ -99,6 +99,40 @@ static func get_work_activity_tiles(
 	_sort_and_deduplicate_tiles(activity_tiles)
 	return activity_tiles
 
+static func get_object_interior_activity_tiles(
+	city_world: WorldData,
+	city_object: Dictionary,
+	citizen_id: int
+) -> Array[Vector2i]:
+	var activity_tiles: Array[Vector2i] = []
+
+	if (
+		city_world == null
+		or city_object.is_empty()
+		or citizen_id <= 0
+	):
+		return activity_tiles
+
+	for raw_tile in WorldData.get_city_object_footprint_tiles(
+		city_object
+	):
+		if not raw_tile is Vector2i:
+			continue
+
+		var tile_position: Vector2i = raw_tile
+
+		if not WorldData.is_city_tile_walkable_for_citizen(
+			city_world,
+			tile_position,
+			citizen_id
+		):
+			continue
+
+		activity_tiles.append(tile_position)
+
+	_sort_and_deduplicate_tiles(activity_tiles)
+	return activity_tiles
+
 static func _get_resource_source_zone_tiles(
 	city_world: WorldData,
 	workplace: Dictionary

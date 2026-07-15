@@ -263,7 +263,8 @@ static func _advance_work_task(
 					city_world,
 					current_tile,
 					preferred_activity_tiles,
-					MAX_WORK_PATH_EXPANDED_NODES
+					MAX_WORK_PATH_EXPANDED_NODES,
+					citizen_id
 				)
 			)
 
@@ -505,7 +506,8 @@ static func _advance_work_task(
 					city_world,
 					current_tile,
 					[new_target_tile],
-					MAX_WORK_PATH_EXPANDED_NODES
+					MAX_WORK_PATH_EXPANDED_NODES,
+					citizen_id
 				)
 			)
 

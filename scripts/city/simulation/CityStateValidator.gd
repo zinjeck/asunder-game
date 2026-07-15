@@ -596,7 +596,8 @@ static func _validate_city_citizen_spatial_state(
 				WorldData
 				.is_city_tile_walkable_for_citizen(
 					city_world,
-					tile_position
+					tile_position,
+					int(citizen_id)
 				)
 			)
 		):

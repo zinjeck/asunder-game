@@ -209,7 +209,8 @@ static func run_tick(
 
 			if not WorldData.is_city_tile_walkable_for_citizen(
 				city_world,
-				next_tile
+				next_tile,
+				citizen_id
 			):
 				if (
 					repath_attempt_count
@@ -237,7 +238,8 @@ static func run_tick(
 				var repath_path := _find_bounded_repath(
 					city_world,
 					current_tile,
-					movement_destination
+					movement_destination,
+					citizen_id
 				)
 
 				if repath_path.is_empty():
@@ -338,14 +340,16 @@ static func run_tick(
 static func _find_bounded_repath(
 	city_world: WorldData,
 	start_tile: Vector2i,
-	destination_tile: Vector2i
+	destination_tile: Vector2i,
+	citizen_id: int
 ) -> Array:
 	var result := (
 		CityNavigationSystemScript.find_path_to_any_city_tile(
 			city_world,
 			start_tile,
 			[destination_tile],
-			MAX_REPATH_EXPANDED_NODES
+			MAX_REPATH_EXPANDED_NODES,
+			citizen_id
 		)
 	)
 

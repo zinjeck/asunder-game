@@ -61,6 +61,12 @@ static var official_city_seed: int = 0
 static var player_city_founded: bool = false
 static var player_city_data: Dictionary = {}
 static var debug_mode_enabled: bool = false
+
+const SIMULATION_SYSTEM_CITIZEN_DECISIONS := "citizen_decisions"
+const SIMULATION_SYSTEM_CITIZEN_MOVEMENT := "citizen_movement"
+const SIMULATION_SYSTEM_CITIZEN_TASKS := "citizen_tasks"
+const SIMULATION_SYSTEM_WORKPLACE_PRODUCTION := "workplace_production"
+
 static var official_selected_region_center: Vector2i = Vector2i(-1, -1)
 static var official_selected_region_top_left: Vector2i = Vector2i(-1, -1)
 static var official_region_size: int = 0
@@ -2764,7 +2770,8 @@ static func set_city_citizen_tile_position(
 
 static func _get_clean_city_citizen_movement_path(
 	city_world: WorldData,
-	raw_path: Array
+	raw_path: Array,
+	citizen_id: int = -1
 ) -> Array:
 	var movement_path := []
 
@@ -2784,7 +2791,8 @@ static func _get_clean_city_citizen_movement_path(
 
 		if not is_city_tile_walkable_for_citizen(
 			city_world,
-			path_tile
+			path_tile,
+			citizen_id
 		):
 			return []
 
@@ -2801,7 +2809,6 @@ static func _get_clean_city_citizen_movement_path(
 		previous_tile = path_tile
 
 	return movement_path
-
 
 static func cancel_city_citizen_movement(
 	citizen_id: int
@@ -2868,7 +2875,8 @@ static func assign_city_citizen_movement_order(
 
 	var movement_path := _get_clean_city_citizen_movement_path(
 		city_world,
-		raw_path
+		raw_path,
+		citizen_id
 	)
 
 	if movement_path.is_empty():
@@ -2965,7 +2973,8 @@ static func commit_city_citizen_movement_tick(
 
 		if not is_city_tile_walkable_for_citizen(
 			city_world,
-			raw_final_tile
+			raw_final_tile,
+			citizen_id
 		):
 			return result
 
@@ -3843,7 +3852,8 @@ static func get_city_object_footprint_tiles(city_object: Dictionary) -> Array:
 
 static func is_city_tile_walkable_for_citizen(
 	city_world: WorldData,
-	tile_position: Vector2i
+	tile_position: Vector2i,
+	citizen_id: int = -1
 ) -> bool:
 	if city_world == null:
 		return false
@@ -3859,14 +3869,9 @@ static func is_city_tile_walkable_for_citizen(
 		tile_position.y
 	)
 
-	if (
-		str(tile.get("terrain", ""))
-		!= TERRAIN_LAND
-	):
+	if str(tile.get("terrain", "")) != TERRAIN_LAND:
 		return false
 
-	# Most city tiles are empty. Avoid allocating an empty Dictionary and
-	# performing an object-index lookup for every A* neighbor on those tiles.
 	if not city_occupied_tiles.has(tile_position):
 		return true
 
@@ -3878,10 +3883,50 @@ static func is_city_tile_walkable_for_citizen(
 	if occupying_object.is_empty():
 		return false
 
-	return (
+	if (
 		str(occupying_object.get("type", ""))
 		== CITY_OBJECT_ROAD
+	):
+		return true
+
+	if (
+		citizen_id <= 0
+		or str(occupying_object.get("type", ""))
+		!= CITY_OBJECT_HOUSE
+	):
+		return false
+
+	var citizen := get_city_citizen_by_id(citizen_id)
+
+	if (
+		citizen.is_empty()
+		or not bool(citizen.get("alive", false))
+	):
+		return false
+
+	var current_position = citizen.get(
+		"city_tile_position",
+		INVALID_CITY_TILE_POSITION
 	)
+
+	# Someone already inside a building must be able to leave after a
+	# housing reassignment.
+	if (
+		current_position is Vector2i
+		and int(city_occupied_tiles.get(current_position, -1))
+		== object_id
+	):
+		return true
+
+	if (
+		int(citizen.get("home_object_id", -1))
+		!= object_id
+	):
+		return false
+
+	return get_city_object_resident_ids(
+		occupying_object
+	).has(citizen_id)
 
 static func _sort_city_tiles_y_then_x(
 	tile_a: Vector2i,
@@ -4454,25 +4499,64 @@ static func clear_city_map_texture_cache() -> void:
 
 static func run_simulation_tick(
 	tick_index: int,
-	minutes_advanced: int
+	minutes_advanced: int,
+	duration_recorder: Callable = Callable()
 ) -> void:
 	# Simulation systems run here in deterministic order.
+	# The optional recorder keeps profiling outside the simulation systems and
+	# avoids clock reads when the debug monitor is disabled.
+	var should_record_durations := duration_recorder.is_valid()
+	var system_start_usec := 0
+
+	if should_record_durations:
+		system_start_usec = Time.get_ticks_usec()
+
 	CitizenDecisionSystem.run_tick(
 		tick_index,
 		minutes_advanced
 	)
+
+	if should_record_durations:
+		duration_recorder.call(
+			SIMULATION_SYSTEM_CITIZEN_DECISIONS,
+			Time.get_ticks_usec() - system_start_usec
+		)
+		system_start_usec = Time.get_ticks_usec()
+
 	CitizenMovementSystem.run_tick(
 		tick_index,
 		minutes_advanced
 	)
+
+	if should_record_durations:
+		duration_recorder.call(
+			SIMULATION_SYSTEM_CITIZEN_MOVEMENT,
+			Time.get_ticks_usec() - system_start_usec
+		)
+		system_start_usec = Time.get_ticks_usec()
+
 	CitizenTaskSystem.run_tick(
 		tick_index,
 		minutes_advanced
 	)
+
+	if should_record_durations:
+		duration_recorder.call(
+			SIMULATION_SYSTEM_CITIZEN_TASKS,
+			Time.get_ticks_usec() - system_start_usec
+		)
+		system_start_usec = Time.get_ticks_usec()
+
 	WorkplaceProductionSystem.run_tick(
 		tick_index,
 		minutes_advanced
 	)
+
+	if should_record_durations:
+		duration_recorder.call(
+			SIMULATION_SYSTEM_WORKPLACE_PRODUCTION,
+			Time.get_ticks_usec() - system_start_usec
+		)
 
 static func reset_runtime_session_state(clear_debug: bool = false) -> void:
 	reset_world_session_state()

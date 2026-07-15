@@ -33,14 +33,14 @@ const CARDINAL_NEIGHBOR_OFFSETS := [
 	Vector2i(0, 1)
 ]
 
-
 static func find_path_to_any_city_tile(
 	city_world: WorldData,
 	start_tile: Vector2i,
 	raw_destination_tiles: Array,
 	max_expanded_nodes: int = (
 		DEFAULT_MAX_EXPANDED_NODES
-	)
+	),
+	citizen_id: int = -1
 ) -> Dictionary:
 	var search_start_usec := Time.get_ticks_usec()
 
@@ -66,7 +66,8 @@ static func find_path_to_any_city_tile(
 
 	if not WorldData.is_city_tile_walkable_for_citizen(
 		city_world,
-		start_tile
+		start_tile,
+		citizen_id
 	):
 		result["status"] = PATH_STATUS_INVALID_START
 
@@ -78,7 +79,8 @@ static func find_path_to_any_city_tile(
 	var destination_tiles := (
 		_get_clean_destination_tiles(
 			city_world,
-			raw_destination_tiles
+			raw_destination_tiles,
+			citizen_id
 		)
 	)
 
@@ -234,7 +236,8 @@ static func find_path_to_any_city_tile(
 				WorldData
 				.is_city_tile_walkable_for_citizen(
 					city_world,
-					neighbor_tile
+					neighbor_tile,
+					citizen_id
 				)
 			):
 				continue
@@ -289,7 +292,8 @@ static func find_path_to_any_city_tile(
 
 static func _get_clean_destination_tiles(
 	city_world: WorldData,
-	raw_destination_tiles: Array
+	raw_destination_tiles: Array,
+	citizen_id: int
 ) -> Array:
 	var destination_tiles := []
 	var destination_lookup: Dictionary = {}
@@ -307,7 +311,8 @@ static func _get_clean_destination_tiles(
 
 		if not WorldData.is_city_tile_walkable_for_citizen(
 			city_world,
-			destination_tile
+			destination_tile,
+			citizen_id
 		):
 			continue
 
